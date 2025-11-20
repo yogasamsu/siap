@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import os
-import zipfile
+import glob  # Library untuk mencari daftar file
 
 # ==========================================
 # 1. KONFIGURASI HALAMAN (WAJIB PALING ATAS)
@@ -16,19 +16,17 @@ def check_password():
     """Mengembalikan True jika user memasukkan password yang benar."""
     
     # --- KONFIGURASI PASSWORD ---
-    # Anda bisa ganti "rahasia123" dengan password yang Anda mau
-    # Atau atur di Streamlit Cloud > Settings > Secrets dengan format: password = "..."
+    # Ganti "admin123" dengan password yang Anda inginkan
     RAHASIA = st.secrets["password"] if "password" in st.secrets else "admin123"
 
     def password_entered():
         if st.session_state["password"] == RAHASIA:
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Hapus dari memori
+            del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
 
     if "password_correct" not in st.session_state:
-        # Tampilan awal: Input Password
         st.text_input(
             "🔒 Masukkan Password Sistem:", 
             type="password", 
@@ -36,25 +34,20 @@ def check_password():
             key="password"
         )
         return False
-    
     elif not st.session_state["password_correct"]:
-        # Password salah
         st.text_input(
             "🔒 Masukkan Password Sistem:", 
             type="password", 
             on_change=password_entered, 
             key="password"
         )
-        st.error("⛔ Password Salah! Silakan coba lagi.")
+        st.error("⛔ Password Salah!")
         return False
-    
     else:
-        # Password benar
         return True
 
-# CEK PASSWORD SEBELUM LANJUT
 if not check_password():
-    st.stop() # Berhenti di sini jika belum login
+    st.stop()
 
 # ==========================================
 # 3. STATE MANAGEMENT & NAVIGASI
@@ -69,7 +62,7 @@ def go_back():
     st.session_state.selected_id = None
 
 # ==========================================
-# 4. LOAD DATA (CACHE & ZIP FIX FOR MAC)
+# 4. LOAD DATA (BACA DARI CHUNKS/PECAHAN)
 # ==========================================
 @st.cache_data
 def load_data():
@@ -83,46 +76,52 @@ def load_data():
         except Exception as e:
             st.error(f"Gagal membaca file RFM: {e}")
     
-    # --- B. Data Transaksi Historis (ZIP) ---
-    path_transaksi_zip = 'sppt_ready.csv.zip'
+    # --- B. Data Transaksi Historis (BACA BANYAK FILE) ---
     df_transaksi = None 
-
-    if os.path.exists(path_transaksi_zip): 
-        try:
-            with zipfile.ZipFile(path_transaksi_zip, 'r') as z:
-                # Cari nama file CSV yang BENAR (abaikan folder __MACOSX)
-                file_list = z.namelist()
-                # Filter: Harus .csv DAN TIDAK berawalan __MACOSX atau ._
-                csv_files = [f for f in file_list if f.endswith('.csv') and not f.startswith('__MACOSX') and not '/._' in f]
-                
-                if csv_files:
-                    target_file = csv_files[0] # Ambil file CSV valid pertama
-                    # Baca CSV
-                    df_transaksi = pd.read_csv(z.open(target_file), parse_dates=['TGL_TERBIT_SPPT'], low_memory=False)
-                    
-                    # Bersihkan Data Transaksi (Standarisasi ID)
-                    df_transaksi['NM_WP_CLEAN'] = df_transaksi['NM_WP_SPPT'].astype(str).str.strip().str.upper()
-                    df_transaksi['ALAMAT_CLEAN'] = df_transaksi['ALAMAT_WP'].astype(str).str.strip().str.upper()
-                    df_transaksi['ID_WP_INDIVIDUAL'] = (
-                        df_transaksi['KD_PROPINSI'].astype(str).str.zfill(2) + '-' +
-                        df_transaksi['KD_DATI2'].astype(str).str.zfill(2) + '-' +
-                        df_transaksi['KD_KECAMATAN'].astype(str).str.zfill(3) + '-' +
-                        df_transaksi['KD_KELURAHAN'].astype(str).str.zfill(3) + '_' + 
-                        df_transaksi['NM_WP_CLEAN'] + '_' + 
-                        df_transaksi['ALAMAT_CLEAN']
-                    )
-                else:
-                    st.warning("ZIP ditemukan tapi tidak ada file CSV valid di dalamnya.")
-        except Exception as e:
-            st.error(f"Gagal membaca file Transaksi ZIP: {e}")
     
+    # 1. Cari file pecahan di folder 'data_chunks'
+    # (Sesuaikan path ini jika file pecahan Anda ada di root folder)
+    chunk_folder = 'data_chunks' 
+    if os.path.exists(chunk_folder):
+        files = glob.glob(os.path.join(chunk_folder, "data_part_*.csv"))
+    else:
+        # Coba cari di folder utama jika tidak ada folder khusus
+        files = glob.glob("data_part_*.csv")
+        
+    if files:
+        try:
+            files.sort() # Urutkan biar part_01, part_02 dst rapi
+            
+            # Baca dan gabung semua file
+            dfs = []
+            for f in files:
+                temp = pd.read_csv(f, parse_dates=['TGL_TERBIT_SPPT'], low_memory=False)
+                dfs.append(temp)
+            
+            if dfs:
+                df_transaksi = pd.concat(dfs, ignore_index=True)
+                
+                # Bersihkan Data Transaksi (Standarisasi ID)
+                # (Wajib dilakukan karena data mentah belum punya ID gabungan)
+                df_transaksi['NM_WP_CLEAN'] = df_transaksi['NM_WP_SPPT'].astype(str).str.strip().str.upper()
+                df_transaksi['ALAMAT_CLEAN'] = df_transaksi['ALAMAT_WP'].astype(str).str.strip().str.upper()
+                df_transaksi['ID_WP_INDIVIDUAL'] = (
+                    df_transaksi['KD_PROPINSI'].astype(str).str.zfill(2) + '-' +
+                    df_transaksi['KD_DATI2'].astype(str).str.zfill(2) + '-' +
+                    df_transaksi['KD_KECAMATAN'].astype(str).str.zfill(3) + '-' +
+                    df_transaksi['KD_KELURAHAN'].astype(str).str.zfill(3) + '_' + 
+                    df_transaksi['NM_WP_CLEAN'] + '_' + 
+                    df_transaksi['ALAMAT_CLEAN']
+                )
+        except Exception as e:
+            st.error(f"Gagal menggabungkan data transaksi: {e}")
+    else:
+        st.warning("Tidak ditemukan file pecahan data transaksi (data_part_*.csv). Grafik historis tidak akan muncul.")
+
     # Bersihkan Nama di RFM untuk pencarian
     if df_rfm is not None:
-        # Fallback jika kolom nama tidak ada
         if 'NAMA_WP' not in df_rfm.columns: df_rfm['NAMA_WP'] = "WP-" + df_rfm.index.astype(str)
-        
         df_rfm['NAMA_SEARCH'] = df_rfm['NAMA_WP'].fillna('').astype(str).str.upper()
-        
         if 'ID_WP_INDIVIDUAL' not in df_rfm.columns: df_rfm['ID_WP_INDIVIDUAL'] = df_rfm.index
 
     return df_rfm, df_transaksi
@@ -197,7 +196,6 @@ def show_detail_page():
         st.button("⬅️ Kembali", on_click=go_back)
         return
 
-    # Ambil Data Profil
     profil_data = df_rfm[df_rfm['ID_WP_INDIVIDUAL'] == wp_id]
     
     if profil_data.empty:
@@ -261,7 +259,6 @@ def show_detail_page():
                 
                 # --- LOGIKA DETEKSI RISIKO ---
                 tunggakan_tercatat = histori[histori['STATUS_PEMBAYARAN_SPPT'] == 0]
-                
                 if not tunggakan_tercatat.empty:
                     total_hutang = tunggakan_tercatat['PBB_YG_HARUS_DIBAYAR_SPPT'].sum()
                     st.error(f"💸 **Tunggakan Tercatat: Rp {total_hutang:,.0f}**")
@@ -273,7 +270,7 @@ def show_detail_page():
                 if gap_tahun > 0:
                     st.warning(f"""
                     ⚠️ **PERHATIAN DATA:**
-                    Data SPPT WP ini berhenti di tahun **{max_tahun_wp}**.
+                    Data SPPT berhenti di tahun **{max_tahun_wp}**.
                     Ada kemungkinan **{gap_tahun} tahun terakhir** belum terbit SPPT/data belum update.
                     """)
                 
@@ -288,7 +285,7 @@ def show_detail_page():
         else:
             st.info("Belum ada data transaksi historis yang ditemukan untuk ID ini.")
     else:
-        st.warning("Database Transaksi (SPPT) tidak tersedia.")
+        st.warning("Database Transaksi (SPPT) tidak tersedia (File Chunks tidak ditemukan).")
 
 # ==========================================
 # 7. MAIN APP LOGIC (ROUTING)
