@@ -30,7 +30,10 @@ def load_data():
     df_rfm = None # Inisialisasi awal
     
     if os.path.exists(path_rfm): 
-        df_rfm = pd.read_csv(path_rfm)
+        try:
+            df_rfm = pd.read_csv(path_rfm)
+        except Exception as e:
+            st.error(f"Gagal membaca file RFM: {e}")
     
     # --- 2. Data Transaksi Historis (ZIP) ---
     path_transaksi_zip = 'sppt_ready.csv.zip'
@@ -90,7 +93,7 @@ def show_search_page():
     st.title("🔍 Pencarian Wajib Pajak")
     
     if df_rfm is None:
-        st.error("⚠️ File Data Profil (hasil_rfm_individu_final.csv) tidak ditemukan di Server.")
+        st.error("⚠️ File Data Profil (hasil_rfm_individu_final.csv) tidak ditemukan di Server. Pastikan file telah diupload ke GitHub.")
         st.stop()
 
     # Input Pencarian
@@ -146,8 +149,19 @@ def show_search_page():
 def show_detail_page():
     wp_id = st.session_state.selected_id
     
+    if df_rfm is None:
+        st.error("Data RFM tidak tersedia.")
+        return
+
     # Ambil Data Profil
-    profil = df_rfm[df_rfm['ID_WP_INDIVIDUAL'] == wp_id].iloc[0]
+    profil_data = df_rfm[df_rfm['ID_WP_INDIVIDUAL'] == wp_id]
+    
+    if profil_data.empty:
+        st.error("Data WP tidak ditemukan.")
+        st.button("⬅️ Kembali", on_click=go_back)
+        return
+
+    profil = profil_data.iloc[0]
     
     st.button("⬅️ Kembali ke Pencarian", on_click=go_back)
     
