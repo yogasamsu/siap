@@ -5,15 +5,63 @@ import os
 import zipfile
 
 # ==========================================
-# 1. KONFIGURASI & SESSION STATE
+# 1. KONFIGURASI HALAMAN (WAJIB PALING ATAS)
 # ==========================================
 st.set_page_config(page_title="Sistem Intelijen Pajak", page_icon="💰", layout="wide")
 
-# Inisialisasi state untuk navigasi halaman
+# ==========================================
+# 2. FITUR KEAMANAN (LOGIN PASSWORD)
+# ==========================================
+def check_password():
+    """Mengembalikan True jika user memasukkan password yang benar."""
+    
+    # --- KONFIGURASI PASSWORD ---
+    # Anda bisa ganti "rahasia123" dengan password yang Anda mau
+    # Atau atur di Streamlit Cloud > Settings > Secrets dengan format: password = "..."
+    RAHASIA = st.secrets["password"] if "password" in st.secrets else "admin123"
+
+    def password_entered():
+        if st.session_state["password"] == RAHASIA:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Hapus dari memori
+        else:
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        # Tampilan awal: Input Password
+        st.text_input(
+            "🔒 Masukkan Password Sistem:", 
+            type="password", 
+            on_change=password_entered, 
+            key="password"
+        )
+        return False
+    
+    elif not st.session_state["password_correct"]:
+        # Password salah
+        st.text_input(
+            "🔒 Masukkan Password Sistem:", 
+            type="password", 
+            on_change=password_entered, 
+            key="password"
+        )
+        st.error("⛔ Password Salah! Silakan coba lagi.")
+        return False
+    
+    else:
+        # Password benar
+        return True
+
+# CEK PASSWORD SEBELUM LANJUT
+if not check_password():
+    st.stop() # Berhenti di sini jika belum login
+
+# ==========================================
+# 3. STATE MANAGEMENT & NAVIGASI
+# ==========================================
 if 'selected_id' not in st.session_state:
     st.session_state.selected_id = None
 
-# FUNGSI NAVIGASI (CALLBACK)
 def go_to_detail(wp_id):
     st.session_state.selected_id = wp_id
 
@@ -21,13 +69,13 @@ def go_back():
     st.session_state.selected_id = None
 
 # ==========================================
-# 2. LOAD DATA (CACHE & ZIP HANDLING)
+# 4. LOAD DATA (CACHE & ZIP FIX FOR MAC)
 # ==========================================
 @st.cache_data
 def load_data():
-    # --- 1. Data Profil RFM ---
+    # --- A. Data Profil RFM ---
     path_rfm = 'hasil_rfm_individu_final.csv'
-    df_rfm = None # Inisialisasi awal
+    df_rfm = None 
     
     if os.path.exists(path_rfm): 
         try:
@@ -35,24 +83,24 @@ def load_data():
         except Exception as e:
             st.error(f"Gagal membaca file RFM: {e}")
     
-    # --- 2. Data Transaksi Historis (ZIP) ---
+    # --- B. Data Transaksi Historis (ZIP) ---
     path_transaksi_zip = 'sppt_ready.csv.zip'
-    df_transaksi = None # Inisialisasi awal
+    df_transaksi = None 
 
     if os.path.exists(path_transaksi_zip): 
         try:
             with zipfile.ZipFile(path_transaksi_zip, 'r') as z:
                 # Cari nama file CSV yang BENAR (abaikan folder __MACOSX)
                 file_list = z.namelist()
-                # Filter: Harus berakhiran .csv DAN TIDAK berawalan __MACOSX
+                # Filter: Harus .csv DAN TIDAK berawalan __MACOSX atau ._
                 csv_files = [f for f in file_list if f.endswith('.csv') and not f.startswith('__MACOSX') and not '/._' in f]
                 
                 if csv_files:
                     target_file = csv_files[0] # Ambil file CSV valid pertama
-                    # Baca CSV dari dalam ZIP
+                    # Baca CSV
                     df_transaksi = pd.read_csv(z.open(target_file), parse_dates=['TGL_TERBIT_SPPT'], low_memory=False)
                     
-                    # Bersihkan Data Transaksi
+                    # Bersihkan Data Transaksi (Standarisasi ID)
                     df_transaksi['NM_WP_CLEAN'] = df_transaksi['NM_WP_SPPT'].astype(str).str.strip().str.upper()
                     df_transaksi['ALAMAT_CLEAN'] = df_transaksi['ALAMAT_WP'].astype(str).str.strip().str.upper()
                     df_transaksi['ID_WP_INDIVIDUAL'] = (
@@ -64,36 +112,32 @@ def load_data():
                         df_transaksi['ALAMAT_CLEAN']
                     )
                 else:
-                    st.error("ZIP ditemukan tapi tidak ada file CSV yang valid di dalamnya.")
+                    st.warning("ZIP ditemukan tapi tidak ada file CSV valid di dalamnya.")
         except Exception as e:
             st.error(f"Gagal membaca file Transaksi ZIP: {e}")
     
     # Bersihkan Nama di RFM untuk pencarian
     if df_rfm is not None:
-        # Pastikan kolom NAMA_WP ada, kalau tidak buat dummy
-        if 'NAMA_WP' not in df_rfm.columns:
-             df_rfm['NAMA_WP'] = "WP-" + df_rfm.index.astype(str)
-             
+        # Fallback jika kolom nama tidak ada
+        if 'NAMA_WP' not in df_rfm.columns: df_rfm['NAMA_WP'] = "WP-" + df_rfm.index.astype(str)
+        
         df_rfm['NAMA_SEARCH'] = df_rfm['NAMA_WP'].fillna('').astype(str).str.upper()
         
-        if 'ID_WP_INDIVIDUAL' not in df_rfm.columns:
-            df_rfm['ID_WP_INDIVIDUAL'] = df_rfm.index
+        if 'ID_WP_INDIVIDUAL' not in df_rfm.columns: df_rfm['ID_WP_INDIVIDUAL'] = df_rfm.index
 
     return df_rfm, df_transaksi
 
-# --- EKSEKUSI LOAD DATA ---
-# Ini baris krusial agar variabel df_rfm terisi sebelum dipakai
+# EKSEKUSI LOAD DATA
 df_rfm, df_transaksi = load_data()
-# --------------------------
 
 # ==========================================
-# 3. HALAMAN PENCARIAN (HALAMAN UTAMA)
+# 5. HALAMAN PENCARIAN (UTAMA)
 # ==========================================
 def show_search_page():
     st.title("🔍 Pencarian Wajib Pajak")
     
     if df_rfm is None:
-        st.error("⚠️ File Data Profil (hasil_rfm_individu_final.csv) tidak ditemukan di Server. Pastikan file telah diupload ke GitHub.")
+        st.error("⚠️ File Data Profil (hasil_rfm_individu_final.csv) tidak ditemukan.")
         st.stop()
 
     # Input Pencarian
@@ -104,7 +148,7 @@ def show_search_page():
     st.markdown("---")
 
     if query:
-        # Filter Data RFM
+        # Filter Data
         hasil = df_rfm[
             df_rfm['NAMA_SEARCH'].str.contains(query, na=False) | 
             df_rfm['ID_WP_INDIVIDUAL'].astype(str).str.contains(query, na=False)
@@ -115,13 +159,12 @@ def show_search_page():
         else:
             st.success(f"Ditemukan {len(hasil)} Wajib Pajak.")
             
-            # Tampilkan max 20 hasil
+            # Tampilkan hasil (Maksimal 20 agar ringan)
             for index, row in hasil.head(20).iterrows():
                 with st.container():
                     c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
                     c1.markdown(f"**{row['NAMA_WP']}**")
                     
-                    # Handle jika kolom ALAMAT_WP tidak ada (backward compatibility)
                     alamat = row.get('ALAMAT_WP', '-')
                     c1.caption(f"{alamat}")
                     
@@ -144,13 +187,14 @@ def show_search_page():
                     st.markdown("---")
 
 # ==========================================
-# 4. HALAMAN DETAIL WP (HALAMAN KEDUA)
+# 6. HALAMAN DETAIL (DRILLED DOWN)
 # ==========================================
 def show_detail_page():
     wp_id = st.session_state.selected_id
     
     if df_rfm is None:
-        st.error("Data RFM tidak tersedia.")
+        st.error("Data tidak tersedia.")
+        st.button("⬅️ Kembali", on_click=go_back)
         return
 
     # Ambil Data Profil
@@ -215,7 +259,7 @@ def show_detail_page():
                 )
                 st.plotly_chart(fig, use_container_width=True)
                 
-                # --- DETEKSI TUNGGAKAN vs DATA HILANG ---
+                # --- LOGIKA DETEKSI RISIKO ---
                 tunggakan_tercatat = histori[histori['STATUS_PEMBAYARAN_SPPT'] == 0]
                 
                 if not tunggakan_tercatat.empty:
@@ -230,7 +274,7 @@ def show_detail_page():
                     st.warning(f"""
                     ⚠️ **PERHATIAN DATA:**
                     Data SPPT WP ini berhenti di tahun **{max_tahun_wp}**.
-                    Ada kemungkinan **{gap_tahun} tahun terakhir** belum terbit SPPT.
+                    Ada kemungkinan **{gap_tahun} tahun terakhir** belum terbit SPPT/data belum update.
                     """)
                 
                 if tunggakan_tercatat.empty and gap_tahun == 0:
@@ -244,10 +288,10 @@ def show_detail_page():
         else:
             st.info("Belum ada data transaksi historis yang ditemukan untuk ID ini.")
     else:
-        st.warning("Database Transaksi (SPPT) tidak tersedia/gagal dimuat.")
+        st.warning("Database Transaksi (SPPT) tidak tersedia.")
 
 # ==========================================
-# 5. MAIN APP LOGIC
+# 7. MAIN APP LOGIC (ROUTING)
 # ==========================================
 if st.session_state.selected_id is not None:
     show_detail_page()
