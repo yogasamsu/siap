@@ -14,10 +14,11 @@ st.set_page_config(page_title="Sistem Intelijen Pajak", page_icon="💰", layout
 # 2. FITUR KEAMANAN (LOGIN)
 # ==========================================
 def check_password():
+    """Mengembalikan True jika user memasukkan password yang benar."""
     try:
         RAHASIA = st.secrets["password"]
     except:
-        RAHASIA = "admin123"
+        RAHASIA = "admin123" # Password default untuk Local
 
     if "password_correct" not in st.session_state:
         st.session_state.password_correct = False
@@ -38,42 +39,48 @@ if not check_password():
     st.stop()
 
 # ==========================================
-# 3. LOAD DATA (OPTIMIZED)
+# 3. LOAD DATA (VERSI CHUNKS / PECAHAN)
 # ==========================================
 @st.cache_data
 def load_data():
-    # A. LOAD RFM
+    # --- A. LOAD RFM PROFILE ---
     path_rfm = 'hasil_rfm_individu_final.csv'
     df_rfm = None
+    
     if os.path.exists(path_rfm):
         try:
             df_rfm = pd.read_csv(path_rfm)
+            # Standarisasi Nama Kolom
             if 'NAMA_WP' not in df_rfm.columns: df_rfm['NAMA_WP'] = "WP-" + df_rfm.index.astype(str)
             df_rfm['NAMA_SEARCH'] = df_rfm['NAMA_WP'].fillna('').astype(str).str.upper()
             if 'ID_WP_INDIVIDUAL' not in df_rfm.columns: df_rfm['ID_WP_INDIVIDUAL'] = df_rfm.index
         except Exception as e:
             st.error(f"Gagal load RFM: {e}")
-
-    # B. LOAD TRANSAKSI (CHUNKS)
+    
+    # --- B. LOAD TRANSAKSI (DARI FOLDER CHUNKS) ---
     df_transaksi = None
+    
     chunk_files = glob.glob("data_chunks/data_part_*.csv")
-    if not chunk_files: chunk_files = glob.glob("data_part_*.csv")
+    if not chunk_files:
+        chunk_files = glob.glob("data_part_*.csv") 
 
     if chunk_files:
         try:
             chunk_files.sort()
             dfs = []
-            # Hanya load kolom penting untuk hemat memori dashboard
-            cols = ['THN_PAJAK_SPPT', 'PBB_YG_HARUS_DIBAYAR_SPPT', 'STATUS_PEMBAYARAN_SPPT', 
-                    'ID_WP_INDIVIDUAL', 'KD_KECAMATAN', 'KD_KELURAHAN', 'NM_WP_SPPT', 'ALAMAT_WP', 'KD_PROPINSI', 'KD_DATI2']
             
-            # Dtypes hemat memori
-            dtypes = {'STATUS_PEMBAYARAN_SPPT': 'int8', 'PBB_YG_HARUS_DIBAYAR_SPPT': 'float32', 
-                      'THN_PAJAK_SPPT': 'int16', 'KD_KECAMATAN': 'int16', 'KD_KELURAHAN': 'int16'}
+            # OPTIMASI MEMORI: Hanya load kolom penting
+            cols_keep = ['THN_PAJAK_SPPT', 'PBB_YG_HARUS_DIBAYAR_SPPT', 'STATUS_PEMBAYARAN_SPPT', 
+                         'KD_PROPINSI', 'KD_DATI2', 'KD_KECAMATAN', 'KD_KELURAHAN', 'NM_WP_SPPT', 'ALAMAT_WP']
+            
+            dtypes = {'KD_PROPINSI': 'int8', 'KD_DATI2': 'int8', 'KD_KECAMATAN': 'int16', 
+                      'KD_KELURAHAN': 'int16', 'THN_PAJAK_SPPT': 'int16', 'STATUS_PEMBAYARAN_SPPT': 'int8',
+                      'PBB_YG_HARUS_DIBAYAR_SPPT': 'float32'}
 
             for f in chunk_files:
-                chunk = pd.read_csv(f, usecols=lambda c: c in cols, dtype=dtypes, low_memory=False)
-                # Recreate ID
+                chunk = pd.read_csv(f, usecols=lambda c: c in cols_keep, dtype=dtypes, low_memory=False)
+                
+                # Bikin ID
                 chunk['ID_WP_INDIVIDUAL'] = (
                     chunk['KD_PROPINSI'].astype(str).str.zfill(2) + '-' +
                     chunk['KD_DATI2'].astype(str).str.zfill(2) + '-' +
@@ -82,21 +89,27 @@ def load_data():
                     chunk['NM_WP_SPPT'].astype(str).str.strip().str.upper() + '_' + 
                     chunk['ALAMAT_WP'].astype(str).str.strip().str.upper()
                 )
-                # Buang kolom teks setelah ID jadi
+                # Buang kolom pembentuk ID
                 chunk = chunk[['ID_WP_INDIVIDUAL', 'THN_PAJAK_SPPT', 'PBB_YG_HARUS_DIBAYAR_SPPT', 'STATUS_PEMBAYARAN_SPPT']]
                 dfs.append(chunk)
             
             if dfs:
                 df_transaksi = pd.concat(dfs, ignore_index=True)
+                
         except Exception as e:
-            st.warning(f"Gagal load transaksi: {e}")
-            
+            st.warning(f"Gagal menggabungkan data chunks: {e}")
+    
     return df_rfm, df_transaksi
 
-MAIN_DF_RFM, MAIN_DF_TRANSAKSI = load_data()
+# EKSEKUSI LOAD DATA
+try:
+    MAIN_DF_RFM, MAIN_DF_TRANSAKSI = load_data()
+except Exception as e:
+    st.error(f"Error Loading Data: {e}")
+    MAIN_DF_RFM, MAIN_DF_TRANSAKSI = None, None
 
 # ==========================================
-# 4. NAVIGASI & STATE
+# 4. NAVIGASI
 # ==========================================
 if 'selected_id' not in st.session_state:
     st.session_state.selected_id = None
@@ -122,7 +135,9 @@ def show_dashboard(df_rfm, df_trans):
 
     # JIKA ADA PENCARIAN -> TAMPILKAN HASIL PENCARIAN
     if query:
-        if df_rfm is None: return
+        if df_rfm is None: 
+            st.error("Data RFM tidak tersedia.")
+            return
         
         hasil = df_rfm[
             df_rfm['NAMA_SEARCH'].str.contains(query, na=False) | 
@@ -137,10 +152,12 @@ def show_dashboard(df_rfm, df_trans):
                 c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
                 c1.markdown(f"**{row.get('NAMA_WP','-')}**")
                 c1.caption(f"{row.get('ALAMAT_WP','-')}")
+                
                 seg = str(row.get('Segment', '-'))
                 if "Berisiko" in seg: c2.error(seg)
                 elif "Champions" in seg: c2.success(seg)
                 else: c2.info(seg)
+                
                 c3.metric("Total Bayar", f"Rp {row.get('Monetary',0):,.0f}")
                 if c4.button("Detail ➡️", key=f"btn_{index}"):
                     go_to_detail(row['ID_WP_INDIVIDUAL'])
@@ -149,7 +166,7 @@ def show_dashboard(df_rfm, df_trans):
     # JIKA TIDAK ADA PENCARIAN -> TAMPILKAN DASHBOARD EKSEKUTIF
     else:
         if df_rfm is None or df_trans is None:
-            st.warning("Data belum siap untuk Dashboard.")
+            st.info("Sedang memuat data Dashboard...")
             return
 
         # --- KPI METRICS (SNAPSHOT) ---
@@ -170,9 +187,9 @@ def show_dashboard(df_rfm, df_trans):
         # Tampilkan KPI
         k1, k2, k3, k4 = st.columns(4)
         k1.metric("Total Wajib Pajak", f"{total_wp:,.0f}")
-        k2.metric(f"Realisasi {tahun_ini}", f"Rp {bayar_ini/1e9:,.1f} Milyar", f"{(bayar_ini/target_ini)*100:.1f}%")
-        k3.metric(f"Potensi Tunggakan {tahun_ini}", f"Rp {tunggak_ini/1e9:,.1f} Milyar", delta_color="inverse")
-        k4.metric("Total Tunggakan (Akumulasi)", f"Rp {total_tunggakan_all/1e9:,.1f} Milyar", delta_color="inverse")
+        k2.metric(f"Realisasi {tahun_ini}", f"Rp {bayar_ini/1e9:,.1f} M", f"{(bayar_ini/target_ini)*100:.1f}%" if target_ini > 0 else "0%")
+        k3.metric(f"Potensi Tunggakan {tahun_ini}", f"Rp {tunggak_ini/1e9:,.1f} M", delta_color="inverse")
+        k4.metric("Total Tunggakan (Akumulasi)", f"Rp {total_tunggakan_all/1e9:,.1f} M", delta_color="inverse")
 
         st.markdown("---")
         
@@ -215,19 +232,19 @@ def show_dashboard(df_rfm, df_trans):
         tab1, tab2, tab3 = st.tabs(["💎 Champions (Patuh)", "🚨 At Risk (Berisiko)", "💤 Sleeping (Tidur)"])
         
         with tab1:
-            top_champ = df_rfm[df_rfm['Segment'].str.contains('Champions')].nlargest(5, 'Monetary')
+            top_champ = df_rfm[df_rfm['Segment'].str.contains('Champions', na=False)].nlargest(5, 'Monetary')
             st.dataframe(top_champ[['NAMA_WP', 'ALAMAT_WP', 'Monetary', 'Frequency']].style.format({'Monetary': 'Rp {:,.0f}'}), use_container_width=True)
             
         with tab2:
-            top_risk = df_rfm[df_rfm['Segment'].str.contains('Berisiko')].nlargest(5, 'Monetary')
+            top_risk = df_rfm[df_rfm['Segment'].str.contains('Berisiko', na=False)].nlargest(5, 'Monetary')
             st.dataframe(top_risk[['NAMA_WP', 'ALAMAT_WP', 'Monetary', 'Frequency']].style.format({'Monetary': 'Rp {:,.0f}'}), use_container_width=True)
 
         with tab3:
-            top_sleep = df_rfm[df_rfm['Segment'].str.contains('Tidur')].nlargest(5, 'Monetary')
+            top_sleep = df_rfm[df_rfm['Segment'].str.contains('Tidur', na=False)].nlargest(5, 'Monetary')
             st.dataframe(top_sleep[['NAMA_WP', 'ALAMAT_WP', 'Monetary', 'Recency']].style.format({'Monetary': 'Rp {:,.0f}'}), use_container_width=True)
 
 # ==========================================
-# 6. HALAMAN DETAIL (SAMA SEPERTI SEBELUMNYA)
+# 6. HALAMAN DETAIL
 # ==========================================
 def show_detail_page(df_rfm, df_trans):
     wp_id = st.session_state.selected_id
@@ -258,12 +275,17 @@ def show_detail_page(df_rfm, df_trans):
             fig = px.bar(histori, x='THN_PAJAK_SPPT', y='PBB_YG_HARUS_DIBAYAR_SPPT', color='Status',
                          color_discrete_map={'Lunas':'#2ecc71', 'Tunggakan':'#e74c3c'})
             st.plotly_chart(fig, use_container_width=True)
+            
+            # Tabel detail
+            view = histori[['THN_PAJAK_SPPT','PBB_YG_HARUS_DIBAYAR_SPPT','Status']]
+            st.dataframe(view, use_container_width=True, hide_index=True)
         else: st.info("Tidak ada data transaksi.")
 
 # ==========================================
-# 7. MAIN ROUTING
+# 7. MAIN ROUTING (FIXED)
 # ==========================================
 if st.session_state.selected_id is not None:
     show_detail_page(MAIN_DF_RFM, MAIN_DF_TRANSAKSI)
 else:
-    show_search_page(MAIN_DF_RFM, MAIN_DF_TRANSAKSI)
+    # PANGGIL FUNGSI DASHBOARD YANG BARU
+    show_dashboard(MAIN_DF_RFM, MAIN_DF_TRANSAKSI)
