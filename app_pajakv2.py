@@ -17,7 +17,15 @@ def check_password():
     
     # --- KONFIGURASI PASSWORD ---
     # Ganti "admin123" dengan password yang Anda inginkan
-    RAHASIA = st.secrets["password"] if "password" in st.secrets else "admin123"
+    # GANTI BARIS INI:
+    # RAHASIA = st.secrets["password"] if "password" in st.secrets else "admin123"
+    
+    # MENJADI INI (Lebih Aman buat Local & Cloud):
+    try:
+        RAHASIA = st.secrets["password"]
+    except:
+        RAHASIA = "admin123"
+    #RAHASIA = st.secrets["password"] if "password" in st.secrets else "admin123"
 
     def password_entered():
         if st.session_state["password"] == RAHASIA:
