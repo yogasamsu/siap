@@ -59,34 +59,51 @@ def go_back():
 # ==========================================
 # UPDATE BAGIAN LOAD DATA
 # ==========================================
+import zipfile  # <--- Tambahkan import ini di paling atas
+
+# ... (kode lain tetap sama) ...
+
 @st.cache_data
 def load_data():
     # 1. Data Profil RFM
     path_rfm = 'hasil_rfm_individu_final.csv'
-    if not os.path.exists(path_rfm): return None, None
+    
+    if not os.path.exists(path_rfm): 
+        st.error(f"File {path_rfm} tidak ditemukan!")
+        return None, None
+        
     df_rfm = pd.read_csv(path_rfm)
     
-    # 2. Data Transaksi Historis (BACA DARI ZIP)
-    # Kita ubah targetnya ke file ZIP
-    path_transaksi_zip = 'sppt_ready.csv.zip' 
+    # 2. Data Transaksi Historis (BACA DARI ZIP DENGAN CARA LEBIH AMAN)
+    path_transaksi_zip = 'sppt_ready.csv.zip'
     
     if not os.path.exists(path_transaksi_zip): 
-        st.error("File 'sppt_ready.csv.zip' tidak ditemukan!")
+        st.error(f"File {path_transaksi_zip} tidak ditemukan!")
         return df_rfm, None
-        
-    # Tambahkan parameter compression='zip'
-    df_transaksi = pd.read_csv(path_transaksi_zip, compression='zip', parse_dates=['TGL_TERBIT_SPPT'], low_memory=False)
+
+    # --- PERBAIKAN UTAMA DI SINI ---
+    try:
+        with zipfile.ZipFile(path_transaksi_zip, 'r') as z:
+            # Cari nama file CSV di dalam ZIP (abaikan folder __MACOSX)
+            file_list = z.namelist()
+            csv_files = [f for f in file_list if f.endswith('.csv') and not f.startswith('__MACOSX')]
+            
+            if not csv_files:
+                st.error("Tidak ada file CSV di dalam ZIP!")
+                return df_rfm, None
+            
+            # Ambil file CSV pertama yang ditemukan
+            target_file = csv_files[0]
+            
+            # Baca CSV dari dalam ZIP
+            df_transaksi = pd.read_csv(z.open(target_file), parse_dates=['TGL_TERBIT_SPPT'], low_memory=False)
+
+    except Exception as e:
+        st.error(f"Gagal membuka ZIP: {e}")
+        return df_rfm, None
+    # -------------------------------
     
-    # ... (Kode pembersihan nama/alamat di bawahnya TETAP SAMA, tidak perlu diubah) ...
-    df_transaksi['NM_WP_CLEAN'] = df_transaksi['NM_WP_SPPT'].astype(str).str.strip().str.upper()
-    # dst...
-    
-    return df_rfm, df_transaksi
-        
-    df_transaksi = pd.read_csv(path_transaksi, parse_dates=['TGL_TERBIT_SPPT'], low_memory=False)
-    
-    # Pastikan ID WP Konsisten
-    # (Kita recreate ID di df_transaksi agar sama persis dengan RFM)
+    # Bersihkan Data
     df_transaksi['NM_WP_CLEAN'] = df_transaksi['NM_WP_SPPT'].astype(str).str.strip().str.upper()
     df_transaksi['ALAMAT_CLEAN'] = df_transaksi['ALAMAT_WP'].astype(str).str.strip().str.upper()
     df_transaksi['ID_WP_INDIVIDUAL'] = (
@@ -99,8 +116,6 @@ def load_data():
     )
     
     return df_rfm, df_transaksi
-
-df_rfm, df_transaksi = load_data()
 
 # ==========================================
 # 3. HALAMAN PENCARIAN (HALAMAN UTAMA)
