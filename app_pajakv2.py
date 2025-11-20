@@ -10,23 +10,47 @@ import glob
 st.set_page_config(page_title="Sistem Intelijen Pajak", page_icon="💰", layout="wide")
 
 # ==========================================
-# 2. FITUR KEAMANAN (LOGIN)
+# 2. FITUR KEAMANAN (LOGIN) - FIXED
 # ==========================================
 def check_password():
     """Mengembalikan True jika user memasukkan password yang benar."""
+    
+    # Tentukan Password
     try:
         RAHASIA = st.secrets["password"]
     except:
         RAHASIA = "admin123" # Default untuk Local
 
+    # Inisialisasi State
     if "password_correct" not in st.session_state:
-        st.text_input("🔒 Password:", type="password", on_change=lambda: None, key="password_input")
-        if st.session_state.get("password_input") == RAHASIA:
-            st.session_state["password_correct"] = True
-            st.rerun()
+        st.session_state.password_correct = False
+
+    # Fungsi Callback untuk Cek Password
+    def password_entered():
+        if st.session_state["password_input"] == RAHASIA:
+            st.session_state.password_correct = True
+            del st.session_state["password_input"]  # Hapus password dari memori
+        else:
+            st.session_state.password_correct = False
+
+    # Tampilan Form Login (Jika belum login)
+    if not st.session_state.password_correct:
+        st.text_input(
+            "🔒 Masukkan Password Sistem:", 
+            type="password", 
+            on_change=password_entered, 
+            key="password_input"
+        )
+        
+        # Tampilkan error jika password salah (tapi bukan saat pertama kali buka)
+        if "password_input" in st.session_state and not st.session_state.password_correct:
+             st.error("⛔ Password Salah!")
+             
         return False
+    
     return True
 
+# Cek Password
 if not check_password():
     st.stop()
 
