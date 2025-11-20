@@ -27,27 +27,25 @@ def go_back():
 def load_data():
     # --- 1. Data Profil RFM ---
     path_rfm = 'hasil_rfm_individu_final.csv'
+    df_rfm = None # Inisialisasi awal
     
-    if not os.path.exists(path_rfm): 
-        # Return None jika file tidak ada, nanti akan dihandle di UI
-        return None, None
-        
-    df_rfm = pd.read_csv(path_rfm)
+    if os.path.exists(path_rfm): 
+        df_rfm = pd.read_csv(path_rfm)
     
     # --- 2. Data Transaksi Historis (ZIP) ---
     path_transaksi_zip = 'sppt_ready.csv.zip'
-    
-    df_transaksi = None # Default None
+    df_transaksi = None # Inisialisasi awal
 
     if os.path.exists(path_transaksi_zip): 
         try:
             with zipfile.ZipFile(path_transaksi_zip, 'r') as z:
-                # Cari nama file CSV di dalam ZIP (abaikan folder __MACOSX)
+                # Cari nama file CSV yang BENAR (abaikan folder __MACOSX)
                 file_list = z.namelist()
-                csv_files = [f for f in file_list if f.endswith('.csv') and not f.startswith('__MACOSX')]
+                # Filter: Harus berakhiran .csv DAN TIDAK berawalan __MACOSX
+                csv_files = [f for f in file_list if f.endswith('.csv') and not f.startswith('__MACOSX') and not '/._' in f]
                 
                 if csv_files:
-                    target_file = csv_files[0]
+                    target_file = csv_files[0] # Ambil file CSV valid pertama
                     # Baca CSV dari dalam ZIP
                     df_transaksi = pd.read_csv(z.open(target_file), parse_dates=['TGL_TERBIT_SPPT'], low_memory=False)
                     
@@ -62,21 +60,28 @@ def load_data():
                         df_transaksi['NM_WP_CLEAN'] + '_' + 
                         df_transaksi['ALAMAT_CLEAN']
                     )
+                else:
+                    st.error("ZIP ditemukan tapi tidak ada file CSV yang valid di dalamnya.")
         except Exception as e:
-            st.error(f"Gagal membaca file Transaksi: {e}")
-
+            st.error(f"Gagal membaca file Transaksi ZIP: {e}")
+    
     # Bersihkan Nama di RFM untuk pencarian
     if df_rfm is not None:
+        # Pastikan kolom NAMA_WP ada, kalau tidak buat dummy
+        if 'NAMA_WP' not in df_rfm.columns:
+             df_rfm['NAMA_WP'] = "WP-" + df_rfm.index.astype(str)
+             
         df_rfm['NAMA_SEARCH'] = df_rfm['NAMA_WP'].fillna('').astype(str).str.upper()
+        
         if 'ID_WP_INDIVIDUAL' not in df_rfm.columns:
             df_rfm['ID_WP_INDIVIDUAL'] = df_rfm.index
 
     return df_rfm, df_transaksi
 
-# --- INI BARIS PENTING YANG TADI HILANG ---
-# Kita harus menjalankan fungsi load_data() agar variabel df_rfm tersedia
+# --- EKSEKUSI LOAD DATA ---
+# Ini baris krusial agar variabel df_rfm terisi sebelum dipakai
 df_rfm, df_transaksi = load_data()
-# ------------------------------------------
+# --------------------------
 
 # ==========================================
 # 3. HALAMAN PENCARIAN (HALAMAN UTAMA)
@@ -85,8 +90,8 @@ def show_search_page():
     st.title("🔍 Pencarian Wajib Pajak")
     
     if df_rfm is None:
-        st.error("File Data (CSV) tidak ditemukan di Server. Pastikan upload berhasil.")
-        st.stop() # Berhenti jika data tidak ada
+        st.error("⚠️ File Data Profil (hasil_rfm_individu_final.csv) tidak ditemukan di Server.")
+        st.stop()
 
     # Input Pencarian
     col1, col2 = st.columns([3, 1])
@@ -107,15 +112,18 @@ def show_search_page():
         else:
             st.success(f"Ditemukan {len(hasil)} Wajib Pajak.")
             
-            # Tampilkan max 20 hasil biar ga berat
+            # Tampilkan max 20 hasil
             for index, row in hasil.head(20).iterrows():
                 with st.container():
                     c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
                     c1.markdown(f"**{row['NAMA_WP']}**")
-                    c1.caption(f"{row['ALAMAT_WP']}")
+                    
+                    # Handle jika kolom ALAMAT_WP tidak ada (backward compatibility)
+                    alamat = row.get('ALAMAT_WP', '-')
+                    c1.caption(f"{alamat}")
                     
                     # Badge Status
-                    segmen = str(row['Segment'])
+                    segmen = str(row.get('Segment', 'Unknown'))
                     if "Berisiko" in segmen:
                         c2.markdown(f":red[**{segmen}**]")
                     elif "Champions" in segmen:
@@ -123,7 +131,8 @@ def show_search_page():
                     else:
                         c2.markdown(f"**{segmen}**")
                         
-                    c3.metric("Total Bayar", f"Rp {row['Monetary']:,.0f}")
+                    monetary = row.get('Monetary', 0)
+                    c3.metric("Total Bayar", f"Rp {monetary:,.0f}")
                     
                     # Tombol Detail
                     if c4.button("Lihat Detail ➡️", key=f"btn_{row['ID_WP_INDIVIDUAL']}"):
@@ -143,21 +152,29 @@ def show_detail_page():
     st.button("⬅️ Kembali ke Pencarian", on_click=go_back)
     
     # --- HEADER ---
-    st.title(f"👤 {profil['NAMA_WP']}")
+    nama = profil.get('NAMA_WP', 'Tanpa Nama')
+    alamat = profil.get('ALAMAT_WP', '-')
+    st.title(f"👤 {nama}")
     st.caption(f"ID: {wp_id}")
-    st.info(f"📍 {profil['ALAMAT_WP']}")
+    st.info(f"📍 {alamat}")
     
     # --- STATUS RFM ---
     st.subheader("📊 Status & Kesehatan Pajak")
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Segmen", profil['Segment'])
-    c2.metric("Total Kontribusi", f"Rp {profil['Monetary']:,.0f}")
-    c3.metric("Frekuensi Bayar", f"{profil['Frequency']} Kali")
-    c4.metric("Terakhir Bayar", f"{profil['Recency']} Hari Lalu")
+    
+    segmen = str(profil.get('Segment', '-'))
+    monetary = profil.get('Monetary', 0)
+    freq = profil.get('Frequency', 0)
+    recency = profil.get('Recency', 0)
 
-    if "Berisiko" in str(profil['Segment']):
+    c1.metric("Segmen", segmen)
+    c2.metric("Total Kontribusi", f"Rp {monetary:,.0f}")
+    c3.metric("Frekuensi Bayar", f"{freq} Kali")
+    c4.metric("Terakhir Bayar", f"{recency} Hari Lalu")
+
+    if "Berisiko" in segmen:
         st.error("⚠️ **WARNING:** WP ini masuk kategori Berisiko Tinggi.")
-    elif "Champions" in str(profil['Segment']):
+    elif "Champions" in segmen:
         st.success("✅ **CHAMPION:** WP ini sangat patuh.")
 
     st.markdown("---")
@@ -187,12 +204,10 @@ def show_detail_page():
                 # --- DETEKSI TUNGGAKAN vs DATA HILANG ---
                 tunggakan_tercatat = histori[histori['STATUS_PEMBAYARAN_SPPT'] == 0]
                 
-                # 1. Cek Tunggakan Resmi (Status = 0)
                 if not tunggakan_tercatat.empty:
                     total_hutang = tunggakan_tercatat['PBB_YG_HARUS_DIBAYAR_SPPT'].sum()
                     st.error(f"💸 **Tunggakan Tercatat: Rp {total_hutang:,.0f}**")
                 
-                # 2. Cek Data Hilang (Stop Bayar)
                 max_tahun_global = df_transaksi['THN_PAJAK_SPPT'].max()
                 max_tahun_wp = histori['THN_PAJAK_SPPT'].max()
                 gap_tahun = max_tahun_global - max_tahun_wp
@@ -201,7 +216,7 @@ def show_detail_page():
                     st.warning(f"""
                     ⚠️ **PERHATIAN DATA:**
                     Data SPPT WP ini berhenti di tahun **{max_tahun_wp}**.
-                    Ada kemungkinan **{gap_tahun} tahun terakhir** (sampai {max_tahun_global}) belum terbit SPPT atau datanya belum masuk sistem.
+                    Ada kemungkinan **{gap_tahun} tahun terakhir** belum terbit SPPT.
                     """)
                 
                 if tunggakan_tercatat.empty and gap_tahun == 0:
@@ -215,7 +230,7 @@ def show_detail_page():
         else:
             st.info("Belum ada data transaksi historis yang ditemukan untuk ID ini.")
     else:
-        st.warning("Database Transaksi (SPPT) tidak tersedia.")
+        st.warning("Database Transaksi (SPPT) tidak tersedia/gagal dimuat.")
 
 # ==========================================
 # 5. MAIN APP LOGIC
