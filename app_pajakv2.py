@@ -2,115 +2,70 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import os
-import glob  # Library untuk mencari daftar file
+import glob
 
 # ==========================================
-# 1. KONFIGURASI HALAMAN (WAJIB PALING ATAS)
+# 1. KONFIGURASI HALAMAN
 # ==========================================
 st.set_page_config(page_title="Sistem Intelijen Pajak", page_icon="💰", layout="wide")
 
 # ==========================================
-# 2. FITUR KEAMANAN (LOGIN PASSWORD)
+# 2. FITUR KEAMANAN (LOGIN)
 # ==========================================
 def check_password():
     """Mengembalikan True jika user memasukkan password yang benar."""
-    
-    # --- KONFIGURASI PASSWORD ---
-    # Ganti "admin123" dengan password yang Anda inginkan
-    # GANTI BARIS INI:
-    # RAHASIA = st.secrets["password"] if "password" in st.secrets else "admin123"
-    
-    # MENJADI INI (Lebih Aman buat Local & Cloud):
     try:
         RAHASIA = st.secrets["password"]
     except:
-        RAHASIA = "admin123"
-    #RAHASIA = st.secrets["password"] if "password" in st.secrets else "admin123"
-
-    def password_entered():
-        if st.session_state["password"] == RAHASIA:
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]
-        else:
-            st.session_state["password_correct"] = False
+        RAHASIA = "admin123" # Default untuk Local
 
     if "password_correct" not in st.session_state:
-        st.text_input(
-            "🔒 Masukkan Password Sistem:", 
-            type="password", 
-            on_change=password_entered, 
-            key="password"
-        )
+        st.text_input("🔒 Password:", type="password", on_change=lambda: None, key="password_input")
+        if st.session_state.get("password_input") == RAHASIA:
+            st.session_state["password_correct"] = True
+            st.rerun()
         return False
-    elif not st.session_state["password_correct"]:
-        st.text_input(
-            "🔒 Masukkan Password Sistem:", 
-            type="password", 
-            on_change=password_entered, 
-            key="password"
-        )
-        st.error("⛔ Password Salah!")
-        return False
-    else:
-        return True
+    return True
 
 if not check_password():
     st.stop()
 
 # ==========================================
-# 3. STATE MANAGEMENT & NAVIGASI
-# ==========================================
-if 'selected_id' not in st.session_state:
-    st.session_state.selected_id = None
-
-def go_to_detail(wp_id):
-    st.session_state.selected_id = wp_id
-
-def go_back():
-    st.session_state.selected_id = None
-
-# ==========================================
-# 4. LOAD DATA (BACA DARI CHUNKS/PECAHAN)
+# 3. LOAD DATA (VERSI CHUNKS / PECAHAN)
 # ==========================================
 @st.cache_data
 def load_data():
-    # --- A. Data Profil RFM ---
+    # --- A. LOAD RFM PROFILE ---
     path_rfm = 'hasil_rfm_individu_final.csv'
-    df_rfm = None 
+    df_rfm = None
     
-    if os.path.exists(path_rfm): 
+    if os.path.exists(path_rfm):
         try:
             df_rfm = pd.read_csv(path_rfm)
+            # Standarisasi Nama Kolom
+            if 'NAMA_WP' not in df_rfm.columns: df_rfm['NAMA_WP'] = "WP-" + df_rfm.index.astype(str)
+            df_rfm['NAMA_SEARCH'] = df_rfm['NAMA_WP'].fillna('').astype(str).str.upper()
+            if 'ID_WP_INDIVIDUAL' not in df_rfm.columns: df_rfm['ID_WP_INDIVIDUAL'] = df_rfm.index
         except Exception as e:
-            st.error(f"Gagal membaca file RFM: {e}")
+            st.error(f"Gagal load RFM: {e}")
     
-    # --- B. Data Transaksi Historis (BACA BANYAK FILE) ---
-    df_transaksi = None 
+    # --- B. LOAD TRANSAKSI (DARI CHUNKS) ---
+    df_transaksi = None
     
-    # 1. Cari file pecahan di folder 'data_chunks'
-    # (Sesuaikan path ini jika file pecahan Anda ada di root folder)
-    chunk_folder = 'data_chunks' 
-    if os.path.exists(chunk_folder):
-        files = glob.glob(os.path.join(chunk_folder, "data_part_*.csv"))
-    else:
-        # Coba cari di folder utama jika tidak ada folder khusus
-        files = glob.glob("data_part_*.csv")
-        
-    if files:
+    # Coba cari di folder 'data_chunks' atau di root
+    chunk_files = glob.glob("data_chunks/data_part_*.csv")
+    if not chunk_files:
+        chunk_files = glob.glob("data_part_*.csv") # Coba cari di root jika folder tidak ada
+
+    if chunk_files:
         try:
-            files.sort() # Urutkan biar part_01, part_02 dst rapi
-            
-            # Baca dan gabung semua file
             dfs = []
-            for f in files:
-                temp = pd.read_csv(f, parse_dates=['TGL_TERBIT_SPPT'], low_memory=False)
-                dfs.append(temp)
+            for f in chunk_files:
+                dfs.append(pd.read_csv(f, parse_dates=['TGL_TERBIT_SPPT'], low_memory=False))
             
             if dfs:
                 df_transaksi = pd.concat(dfs, ignore_index=True)
-                
-                # Bersihkan Data Transaksi (Standarisasi ID)
-                # (Wajib dilakukan karena data mentah belum punya ID gabungan)
+                # Bersihkan ID untuk Join
                 df_transaksi['NM_WP_CLEAN'] = df_transaksi['NM_WP_SPPT'].astype(str).str.strip().str.upper()
                 df_transaksi['ALAMAT_CLEAN'] = df_transaksi['ALAMAT_WP'].astype(str).str.strip().str.upper()
                 df_transaksi['ID_WP_INDIVIDUAL'] = (
@@ -122,183 +77,121 @@ def load_data():
                     df_transaksi['ALAMAT_CLEAN']
                 )
         except Exception as e:
-            st.error(f"Gagal menggabungkan data transaksi: {e}")
-    else:
-        st.warning("Tidak ditemukan file pecahan data transaksi (data_part_*.csv). Grafik historis tidak akan muncul.")
-
-    # Bersihkan Nama di RFM untuk pencarian
-    if df_rfm is not None:
-        if 'NAMA_WP' not in df_rfm.columns: df_rfm['NAMA_WP'] = "WP-" + df_rfm.index.astype(str)
-        df_rfm['NAMA_SEARCH'] = df_rfm['NAMA_WP'].fillna('').astype(str).str.upper()
-        if 'ID_WP_INDIVIDUAL' not in df_rfm.columns: df_rfm['ID_WP_INDIVIDUAL'] = df_rfm.index
-
+            st.warning(f"Gagal menggabungkan data chunks: {e}")
+    
     return df_rfm, df_transaksi
 
-# EKSEKUSI LOAD DATA
-df_rfm, df_transaksi = load_data()
+# EKSEKUSI LOAD DATA (Di Global Scope)
+# Variabel ini akan dilempar ke fungsi-fungsi di bawah
+MAIN_DF_RFM, MAIN_DF_TRANSAKSI = load_data()
 
 # ==========================================
-# 5. HALAMAN PENCARIAN (UTAMA)
+# 4. NAVIGASI
 # ==========================================
-def show_search_page():
+if 'selected_id' not in st.session_state:
+    st.session_state.selected_id = None
+
+def go_to_detail(wp_id):
+    st.session_state.selected_id = wp_id
+
+def go_back():
+    st.session_state.selected_id = None
+
+# ==========================================
+# 5. HALAMAN PENCARIAN
+# ==========================================
+def show_search_page(df_rfm): # <--- Perhatikan: Menerima parameter df_rfm
     st.title("🔍 Pencarian Wajib Pajak")
     
     if df_rfm is None:
-        st.error("⚠️ File Data Profil (hasil_rfm_individu_final.csv) tidak ditemukan.")
+        st.error("⚠️ Data Profil (RFM) tidak ditemukan. Pastikan file 'hasil_rfm_individu_final.csv' ada di GitHub.")
         st.stop()
 
-    # Input Pencarian
     col1, col2 = st.columns([3, 1])
     with col1:
-        query = st.text_input("Masukkan Nama / NOP / Alamat:", placeholder="Contoh: YOGA PRATAMA").upper()
+        query = st.text_input("Cari Nama / ID / Alamat:", placeholder="Ketik nama...").upper()
     
     st.markdown("---")
 
     if query:
-        # Filter Data
         hasil = df_rfm[
             df_rfm['NAMA_SEARCH'].str.contains(query, na=False) | 
             df_rfm['ID_WP_INDIVIDUAL'].astype(str).str.contains(query, na=False)
         ]
         
         if len(hasil) == 0:
-            st.warning("Tidak ditemukan data.")
+            st.warning("Tidak ditemukan.")
         else:
-            st.success(f"Ditemukan {len(hasil)} Wajib Pajak.")
-            
-            # Tampilkan hasil (Maksimal 20 agar ringan)
-            for index, row in hasil.head(20).iterrows():
+            st.success(f"Ditemukan {len(hasil)} data.")
+            for index, row in hasil.head(10).iterrows():
                 with st.container():
                     c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
-                    c1.markdown(f"**{row['NAMA_WP']}**")
+                    c1.markdown(f"**{row.get('NAMA_WP','-')}**")
+                    c1.caption(f"{row.get('ALAMAT_WP','-')}")
                     
-                    alamat = row.get('ALAMAT_WP', '-')
-                    c1.caption(f"{alamat}")
-                    
-                    # Badge Status
-                    segmen = str(row.get('Segment', 'Unknown'))
-                    if "Berisiko" in segmen:
-                        c2.markdown(f":red[**{segmen}**]")
-                    elif "Champions" in segmen:
-                        c2.markdown(f":green[**{segmen}**]")
-                    else:
-                        c2.markdown(f"**{segmen}**")
+                    segmen = str(row.get('Segment', '-'))
+                    if "Berisiko" in segmen: c2.error(segmen)
+                    elif "Champions" in segmen: c2.success(segmen)
+                    else: c2.info(segmen)
                         
-                    monetary = row.get('Monetary', 0)
-                    c3.metric("Total Bayar", f"Rp {monetary:,.0f}")
+                    c3.metric("Total Bayar", f"Rp {row.get('Monetary',0):,.0f}")
                     
-                    # Tombol Detail
-                    if c4.button("Lihat Detail ➡️", key=f"btn_{row['ID_WP_INDIVIDUAL']}"):
+                    if c4.button("Detail ➡️", key=f"btn_{index}"):
                         go_to_detail(row['ID_WP_INDIVIDUAL'])
-                    
                     st.markdown("---")
 
 # ==========================================
-# 6. HALAMAN DETAIL (DRILLED DOWN)
+# 6. HALAMAN DETAIL
 # ==========================================
-def show_detail_page():
+def show_detail_page(df_rfm, df_trans): # <--- Menerima parameter
     wp_id = st.session_state.selected_id
     
-    if df_rfm is None:
-        st.error("Data tidak tersedia.")
-        st.button("⬅️ Kembali", on_click=go_back)
-        return
-
-    profil_data = df_rfm[df_rfm['ID_WP_INDIVIDUAL'] == wp_id]
+    if df_rfm is None: return
     
+    profil_data = df_rfm[df_rfm['ID_WP_INDIVIDUAL'] == wp_id]
     if profil_data.empty:
-        st.error("Data WP tidak ditemukan.")
-        st.button("⬅️ Kembali", on_click=go_back)
+        st.error("Data tidak ditemukan.")
+        st.button("Kembali", on_click=go_back)
         return
 
     profil = profil_data.iloc[0]
     
-    st.button("⬅️ Kembali ke Pencarian", on_click=go_back)
-    
-    # --- HEADER ---
-    nama = profil.get('NAMA_WP', 'Tanpa Nama')
-    alamat = profil.get('ALAMAT_WP', '-')
-    st.title(f"👤 {nama}")
+    st.button("⬅️ Kembali", on_click=go_back)
+    st.title(f"👤 {profil.get('NAMA_WP','-')}")
     st.caption(f"ID: {wp_id}")
-    st.info(f"📍 {alamat}")
+    st.info(f"📍 {profil.get('ALAMAT_WP','-')}")
     
-    # --- STATUS RFM ---
-    st.subheader("📊 Status & Kesehatan Pajak")
+    # Metrics
     c1, c2, c3, c4 = st.columns(4)
-    
-    segmen = str(profil.get('Segment', '-'))
-    monetary = profil.get('Monetary', 0)
-    freq = profil.get('Frequency', 0)
-    recency = profil.get('Recency', 0)
-
-    c1.metric("Segmen", segmen)
-    c2.metric("Total Kontribusi", f"Rp {monetary:,.0f}")
-    c3.metric("Frekuensi Bayar", f"{freq} Kali")
-    c4.metric("Terakhir Bayar", f"{recency} Hari Lalu")
-
-    if "Berisiko" in segmen:
-        st.error("⚠️ **WARNING:** WP ini masuk kategori Berisiko Tinggi.")
-    elif "Champions" in segmen:
-        st.success("✅ **CHAMPION:** WP ini sangat patuh.")
+    c1.metric("Segmen", profil.get('Segment','-'))
+    c2.metric("Monetary", f"Rp {profil.get('Monetary',0):,.0f}")
+    c3.metric("Frequency", f"{profil.get('Frequency',0)} Kali")
+    c4.metric("Recency", f"{profil.get('Recency',0)} Hari")
 
     st.markdown("---")
     
-    # --- DATA HISTORIS ---
-    if df_transaksi is not None:
-        histori = df_transaksi[df_transaksi['ID_WP_INDIVIDUAL'] == wp_id].sort_values('THN_PAJAK_SPPT')
+    # Grafik
+    if df_trans is not None:
+        histori = df_trans[df_trans['ID_WP_INDIVIDUAL'] == wp_id].sort_values('THN_PAJAK_SPPT')
         
         if not histori.empty:
-            c_chart, c_data = st.columns([2, 1])
+            histori['Status'] = histori['STATUS_PEMBAYARAN_SPPT'].map({1:'Lunas', 0:'Tunggakan'})
+            fig = px.bar(histori, x='THN_PAJAK_SPPT', y='PBB_YG_HARUS_DIBAYAR_SPPT', color='Status',
+                         color_discrete_map={'Lunas':'#2ecc71', 'Tunggakan':'#e74c3c'})
+            st.plotly_chart(fig, use_container_width=True)
             
-            with c_chart:
-                st.subheader("📈 Grafik Tren Pembayaran")
-                
-                histori['Status'] = histori['STATUS_PEMBAYARAN_SPPT'].map({1: 'Lunas', 0: 'Tunggakan'})
-                
-                fig = px.bar(
-                    histori, 
-                    x='THN_PAJAK_SPPT', 
-                    y='PBB_YG_HARUS_DIBAYAR_SPPT',
-                    color='Status',
-                    color_discrete_map={'Lunas': '#2ecc71', 'Tunggakan': '#e74c3c'},
-                    title="Riwayat Tagihan PBB"
-                )
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # --- LOGIKA DETEKSI RISIKO ---
-                tunggakan_tercatat = histori[histori['STATUS_PEMBAYARAN_SPPT'] == 0]
-                if not tunggakan_tercatat.empty:
-                    total_hutang = tunggakan_tercatat['PBB_YG_HARUS_DIBAYAR_SPPT'].sum()
-                    st.error(f"💸 **Tunggakan Tercatat: Rp {total_hutang:,.0f}**")
-                
-                max_tahun_global = df_transaksi['THN_PAJAK_SPPT'].max()
-                max_tahun_wp = histori['THN_PAJAK_SPPT'].max()
-                gap_tahun = max_tahun_global - max_tahun_wp
-                
-                if gap_tahun > 0:
-                    st.warning(f"""
-                    ⚠️ **PERHATIAN DATA:**
-                    Data SPPT berhenti di tahun **{max_tahun_wp}**.
-                    Ada kemungkinan **{gap_tahun} tahun terakhir** belum terbit SPPT/data belum update.
-                    """)
-                
-                if tunggakan_tercatat.empty and gap_tahun == 0:
-                    st.success("🎉 Bersih! Tidak ada tunggakan tercatat.")
-
-            with c_data:
-                st.subheader("🗂️ Tabel Historis")
-                view = histori[['THN_PAJAK_SPPT', 'PBB_YG_HARUS_DIBAYAR_SPPT', 'Status']].copy()
-                view['PBB_YG_HARUS_DIBAYAR_SPPT'] = view['PBB_YG_HARUS_DIBAYAR_SPPT'].apply(lambda x: f"{x:,.0f}")
-                st.dataframe(view, hide_index=True, use_container_width=True)
+            # Tabel
+            view = histori[['THN_PAJAK_SPPT','PBB_YG_HARUS_DIBAYAR_SPPT','Status']]
+            st.dataframe(view, use_container_width=True, hide_index=True)
         else:
-            st.info("Belum ada data transaksi historis yang ditemukan untuk ID ini.")
+            st.info("Tidak ada data transaksi detail.")
     else:
-        st.warning("Database Transaksi (SPPT) tidak tersedia (File Chunks tidak ditemukan).")
+        st.warning("Database transaksi belum tersedia (Folder data_chunks belum diupload).")
 
 # ==========================================
-# 7. MAIN APP LOGIC (ROUTING)
+# 7. MAIN ROUTING
 # ==========================================
 if st.session_state.selected_id is not None:
-    show_detail_page()
+    show_detail_page(MAIN_DF_RFM, MAIN_DF_TRANSAKSI)
 else:
-    show_search_page()
+    show_search_page(MAIN_DF_RFM)
