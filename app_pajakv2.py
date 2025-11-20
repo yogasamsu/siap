@@ -55,7 +55,7 @@ if not check_password():
     st.stop()
 
 # ==========================================
-# 3. LOAD DATA (VERSI CHUNKS / PECAHAN)
+# 4. LOAD DATA (VERSI DIET MEMORI)
 # ==========================================
 @st.cache_data
 def load_data():
@@ -65,7 +65,9 @@ def load_data():
     
     if os.path.exists(path_rfm):
         try:
+            # Load RFM seperti biasa (ini filenya kecil, jadi aman)
             df_rfm = pd.read_csv(path_rfm)
+            
             # Standarisasi Nama Kolom
             if 'NAMA_WP' not in df_rfm.columns: df_rfm['NAMA_WP'] = "WP-" + df_rfm.index.astype(str)
             df_rfm['NAMA_SEARCH'] = df_rfm['NAMA_WP'].fillna('').astype(str).str.upper()
@@ -73,56 +75,63 @@ def load_data():
         except Exception as e:
             st.error(f"Gagal load RFM: {e}")
     
-    # --- B. LOAD TRANSAKSI (DARI CHUNKS) ---
+    # --- B. LOAD TRANSAKSI (OPTIMISASI RAM EKSTREM) ---
     df_transaksi = None
     
-    # Coba cari di folder 'data_chunks' atau di root
     chunk_files = glob.glob("data_chunks/data_part_*.csv")
     if not chunk_files:
-        chunk_files = glob.glob("data_part_*.csv") # Coba cari di root jika folder tidak ada
+        chunk_files = glob.glob("data_part_*.csv") 
 
     if chunk_files:
         try:
+            chunk_files.sort()
             dfs = []
+            
+            # Kolom yang WAJIB saja. Buang yang lain untuk hemat RAM.
+            # Kita TIDAK butuh Nama/Alamat di tabel transaksi karena sudah ada di RFM
+            cols_to_keep = [
+                'KD_PROPINSI', 'KD_DATI2', 'KD_KECAMATAN', 'KD_KELURAHAN', 
+                'NM_WP_SPPT', 'ALAMAT_WP', # Kita butuh ini CUMA untuk bikin ID, nanti dibuang
+                'THN_PAJAK_SPPT', 'PBB_YG_HARUS_DIBAYAR_SPPT', 'STATUS_PEMBAYARAN_SPPT'
+            ]
+
+            # Tipe data hemat memori
+            dtypes = {
+                'KD_PROPINSI': 'int8', 'KD_DATI2': 'int8', 
+                'KD_KECAMATAN': 'int16', 'KD_KELURAHAN': 'int16',
+                'THN_PAJAK_SPPT': 'int16', 'STATUS_PEMBAYARAN_SPPT': 'int8',
+                'PBB_YG_HARUS_DIBAYAR_SPPT': 'float32'
+            }
+
             for f in chunk_files:
-                dfs.append(pd.read_csv(f, parse_dates=['TGL_TERBIT_SPPT'], low_memory=False))
+                # 1. Baca pecahan
+                chunk = pd.read_csv(f, usecols=lambda c: c in cols_to_keep, dtype=dtypes, low_memory=False)
+                
+                # 2. Langsung buat ID di pecahan kecil (lebih ringan)
+                # (Kita pakai try-except untuk handle jika kolom nama tidak string)
+                chunk['ID_WP_INDIVIDUAL'] = (
+                    chunk['KD_PROPINSI'].astype(str).str.zfill(2) + '-' +
+                    chunk['KD_DATI2'].astype(str).str.zfill(2) + '-' +
+                    chunk['KD_KECAMATAN'].astype(str).str.zfill(3) + '-' +
+                    chunk['KD_KELURAHAN'].astype(str).str.zfill(3) + '_' + 
+                    chunk['NM_WP_SPPT'].astype(str).str.strip().str.upper() + '_' + 
+                    chunk['ALAMAT_WP'].astype(str).str.strip().str.upper()
+                )
+                
+                # 3. BUANG KOLOM SAMPAH SEGERA!
+                # Setelah ID jadi, kita tidak butuh lagi kolom-kolom pembentuknya di memori
+                chunk = chunk[['ID_WP_INDIVIDUAL', 'THN_PAJAK_SPPT', 'PBB_YG_HARUS_DIBAYAR_SPPT', 'STATUS_PEMBAYARAN_SPPT']]
+                
+                dfs.append(chunk)
             
             if dfs:
+                # Gabung data yang sudah kurus
                 df_transaksi = pd.concat(dfs, ignore_index=True)
-                # Bersihkan ID untuk Join
-                df_transaksi['NM_WP_CLEAN'] = df_transaksi['NM_WP_SPPT'].astype(str).str.strip().str.upper()
-                df_transaksi['ALAMAT_CLEAN'] = df_transaksi['ALAMAT_WP'].astype(str).str.strip().str.upper()
-                df_transaksi['ID_WP_INDIVIDUAL'] = (
-                    df_transaksi['KD_PROPINSI'].astype(str).str.zfill(2) + '-' +
-                    df_transaksi['KD_DATI2'].astype(str).str.zfill(2) + '-' +
-                    df_transaksi['KD_KECAMATAN'].astype(str).str.zfill(3) + '-' +
-                    df_transaksi['KD_KELURAHAN'].astype(str).str.zfill(3) + '_' + 
-                    df_transaksi['NM_WP_CLEAN'] + '_' + 
-                    df_transaksi['ALAMAT_CLEAN']
-                )
+                
         except Exception as e:
-            st.warning(f"Gagal menggabungkan data chunks: {e}")
+            st.warning(f"Gagal memproses data chunks: {e}")
     
     return df_rfm, df_transaksi
-
-# EKSEKUSI LOAD DATA (Di Global Scope)
-# Variabel ini akan dilempar ke fungsi-fungsi di bawah
-MAIN_DF_RFM, MAIN_DF_TRANSAKSI = load_data()
-
-# --- DEBUGGING: CEK FILE DI SERVER ---
-st.sidebar.warning("🛠️ Debug Mode: On")
-current_path = os.getcwd()
-st.sidebar.write(f"📂 Folder Saat Ini: `{current_path}`")
-
-st.sidebar.write("📁 Isi Folder Root:")
-st.sidebar.code(os.listdir(current_path))
-
-if os.path.exists("data_chunks"):
-    st.sidebar.success("✅ Folder 'data_chunks' DITEMUKAN!")
-    st.sidebar.write("📄 Isi Folder 'data_chunks':")
-    st.sidebar.code(os.listdir("data_chunks"))
-else:
-    st.sidebar.error("❌ Folder 'data_chunks' TIDAK DITEMUKAN di sini.")
 # ==========================================
 # 4. NAVIGASI
 # ==========================================
