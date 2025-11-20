@@ -85,6 +85,20 @@ def load_data():
 # Variabel ini akan dilempar ke fungsi-fungsi di bawah
 MAIN_DF_RFM, MAIN_DF_TRANSAKSI = load_data()
 
+# --- DEBUGGING: CEK FILE DI SERVER ---
+st.sidebar.warning("🛠️ Debug Mode: On")
+current_path = os.getcwd()
+st.sidebar.write(f"📂 Folder Saat Ini: `{current_path}`")
+
+st.sidebar.write("📁 Isi Folder Root:")
+st.sidebar.code(os.listdir(current_path))
+
+if os.path.exists("data_chunks"):
+    st.sidebar.success("✅ Folder 'data_chunks' DITEMUKAN!")
+    st.sidebar.write("📄 Isi Folder 'data_chunks':")
+    st.sidebar.code(os.listdir("data_chunks"))
+else:
+    st.sidebar.error("❌ Folder 'data_chunks' TIDAK DITEMUKAN di sini.")
 # ==========================================
 # 4. NAVIGASI
 # ==========================================
