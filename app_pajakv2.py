@@ -110,7 +110,7 @@ def go_back():
 # 5. HALAMAN DASHBOARD (UPDATE FILTER TAHUN)
 # ==========================================
 def show_dashboard(df_rfm, df_trans):
-    st.title("📊 Dashboard Eksekutif Pajak Daerah")
+    st.title("📊 SIAP (Sitem Informasi & Analisa Pajak)")
     
     # --- INPUT PENCARIAN ---
     col_search, col_spacer = st.columns([3, 1])
