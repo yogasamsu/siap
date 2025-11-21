@@ -124,7 +124,7 @@ def go_back():
 # 5. HALAMAN DASHBOARD UTAMA (SEARCH + KPI)
 # ==========================================
 def show_dashboard(df_rfm, df_trans):
-    st.title("📊 SIAP (Sistem Informasi & Analisa Pajak)")
+    st.title("📊 Dashboard Eksekutif Pajak Daerah")
     
     # --- INPUT PENCARIAN ---
     col_search, col_spacer = st.columns([3, 1])
@@ -169,11 +169,11 @@ def show_dashboard(df_rfm, df_trans):
             st.info("Sedang memuat data Dashboard...")
             return
 
-        # --- KPI METRICS (SNAPSHOT) ---
+        # --- KPI METRICS ---
         tahun_ini = df_trans['THN_PAJAK_SPPT'].max()
         data_tahun_ini = df_trans[df_trans['THN_PAJAK_SPPT'] == tahun_ini]
-        total_wp = df_rfm['ID_WP_INDIVIDUAL'].nunique()
         
+        total_wp = df_rfm['ID_WP_INDIVIDUAL'].nunique()
         bayar_ini = data_tahun_ini[data_tahun_ini['STATUS_PEMBAYARAN_SPPT'] == 1]['PBB_YG_HARUS_DIBAYAR_SPPT'].sum()
         tunggak_ini = data_tahun_ini[data_tahun_ini['STATUS_PEMBAYARAN_SPPT'] == 0]['PBB_YG_HARUS_DIBAYAR_SPPT'].sum()
         target_ini = bayar_ini + tunggak_ini
@@ -187,48 +187,68 @@ def show_dashboard(df_rfm, df_trans):
 
         st.markdown("---")
         
-        # --- BARIS 2: RFM BAR CHART & PENJELASAN (Layout KSO SCISI) ---
+        # --- BARIS 2: BAR CHART RFM (WARNA MANUAL) ---
         st.subheader("🗺️ Peta Kekuatan WP (Segmentasi)")
         
-        # Siapkan Data Chart
+        # Agregasi Data
         bar_data = df_rfm.groupby('Segment').agg(
             Count=('ID_WP_INDIVIDUAL', 'count'),
             Monetary=('Monetary', 'sum')
-        ).reset_index().sort_values('Count', ascending=True)
+        ).reset_index()
 
+        # --- DEFINISI WARNA MANUAL (HIJAU -> MERAH) ---
+        # Sesuaikan nama segmen persis dengan data Anda
+        color_map = {
+            'WP Patuh Terbaik (Champions)': '#2ecc71', # Hijau Terang
+            'WP Patuh (Nilai Kecil)': '#82e0aa',       # Hijau Muda
+            'WP Baru (New)': '#3498db',                # Biru
+            'WP Potensial (Potential)': '#f1c40f',     # Kuning
+            'WP Lainnya (Need Attention)': '#95a5a6',  # Abu-abu
+            'WP Tidur (Nilai Kecil)': '#e67e22',       # Oranye
+            'WP Tidur (Nilai Besar)': '#d35400',       # Oranye Gelap
+            'WP Berisiko (At Risk)': '#e74c3c'         # Merah
+        }
+        
+        # Urutkan berdasarkan logika risiko (Hijau di atas, Merah di bawah)
+        urutan_segmen = [
+            'WP Patuh Terbaik (Champions)', 'WP Patuh (Nilai Kecil)', 
+            'WP Baru (New)', 'WP Potensial (Potential)', 
+            'WP Lainnya (Need Attention)', 
+            'WP Tidur (Nilai Kecil)', 'WP Tidur (Nilai Besar)', 'WP Berisiko (At Risk)'
+        ]
+        
         col_chart, col_text = st.columns([2, 1])
         
         with col_chart:
-            # Visualisasi Bar Chart Horizontal
             fig_bar = px.bar(
                 bar_data,
                 x='Count',
                 y='Segment',
                 orientation='h',
                 text='Count',
-                color='Monetary',
-                color_continuous_scale='Blues',
-                title="Jumlah WP per Segmen (Warna = Nilai Kontribusi)",
-                labels={'Count': 'Jumlah WP', 'Segment': '', 'Monetary': 'Rupiah'}
+                color='Segment', # Gunakan segmen sebagai dasar warna
+                color_discrete_map=color_map, # Terapkan peta warna manual
+                category_orders={'Segment': urutan_segmen}, # Paksa urutan
+                title="Komposisi Wajib Pajak (Hijau=Aman, Merah=Bahaya)",
+                labels={'Count': 'Jumlah WP', 'Segment': ''}
             )
             fig_bar.update_traces(texttemplate='%{text:.2s}', textposition='outside')
             fig_bar.update_layout(height=450, showlegend=False)
             st.plotly_chart(fig_bar, use_container_width=True)
 
         with col_text:
-            st.markdown("#### 📖 Kamus Segmen")
-            with st.expander("💎 Champions (Patuh)", expanded=True):
-                st.caption("Selalu bayar tepat waktu, nilai pajak besar.")
-                st.markdown(":green[**Action:**] *Pertahankan (Retensi).*")
-            with st.expander("🚨 At Risk (Berisiko)"):
-                st.caption("Dulu aktif, baru-baru ini berhenti bayar.")
-                st.markdown(":red[**Action:**] *Kunjungan Prioritas!*")
-            with st.expander("💤 Sleeping (Tidur)"):
-                st.caption("Sudah lama tidak bayar (>3 tahun).")
-                st.markdown(":orange[**Action:**] *Cek Lapangan / Pemutihan.*")
-            with st.expander("🌱 New / Potensial"):
-                st.caption("WP Baru atau mulai rajin.")
-                st.markdown(":blue[**Action:**] *Edukasi & Reminder.*")
+            st.markdown("#### 📖 Panduan Strategi")
+            with st.expander("🟢 ZONA HIJAU (Aman)", expanded=True):
+                st.write("**Champions & Patuh:**")
+                st.caption("WP yang selalu bayar tepat waktu. **Strategi:** Apresiasi & Retensi (Jangan diganggu).")
+            
+            with st.expander("🟡 ZONA KUNING (Perlu Atensi)"):
+                st.write("**Potensial & Baru:**")
+                st.caption("WP yang mulai rajin atau baru masuk. **Strategi:** Edukasi & Reminder Halus.")
+            
+            with st.expander("🔴 ZONA MERAH (Bahaya)"):
+                st.write("**Berisiko & Tidur:**")
+                st.caption("WP yang menunggak atau berhenti bayar. **Strategi:** Kunjungan Prioritas & Penagihan Aktif.")
 
         st.markdown("---")
         
