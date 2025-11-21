@@ -187,6 +187,26 @@ def show_dashboard(df_rfm, df_trans):
         # KPI Dinamis
         #persen = (bayar_ini/target_ini)*100 if target_ini > 0 else 0
         # (KODE BARU)
+        # --- KPI METRICS (DINAMIS SESUAI FILTER) ---
+        total_wp = df_rfm['ID_WP_INDIVIDUAL'].nunique()
+        
+        # Hitung Realisasi vs Tunggakan dari data_filtered
+        bayar_ini = data_filtered[data_filtered['STATUS_PEMBAYARAN_SPPT'] == 1]['PBB_YG_HARUS_DIBAYAR_SPPT'].sum()
+        tunggak_ini = data_filtered[data_filtered['STATUS_PEMBAYARAN_SPPT'] == 0]['PBB_YG_HARUS_DIBAYAR_SPPT'].sum()
+        
+        # Hitung Tunggakan Total (Selalu Akumulasi)
+        total_tunggakan_all = df_trans[df_trans['STATUS_PEMBAYARAN_SPPT'] == 0]['PBB_YG_HARUS_DIBAYAR_SPPT'].sum()
+
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Total Wajib Pajak", f"{total_wp:,.0f}")
+        
+        # --- PERBAIKAN DI SINI (Gunakan label_kpi) ---
+        # Hapus persen (argumen ke-3), dan gunakan label_kpi bukan tahun_ini
+        #k2.metric(f"Realisasi ({label_kpi})", f"Rp {bayar_ini/1e9:,.1f} M")
+        #k3.metric(f"Tunggakan ({label_kpi})", f"Rp {tunggak_ini/1e9:,.1f} M", delta_color="inverse")
+        
+        # KPI Statis
+        k4.metric("Total Tunggakan (Akumulasi)", f"Rp {total_tunggakan_all/1e9:,.1f} M", delta_color="inverse")
         k2.metric(f"Realisasi {tahun_ini}", f"Rp {bayar_ini/1e9:,.1f} M")
         k3.metric(f"Potensi Tunggakan {tahun_ini}", f"Rp {tunggak_ini/1e9:,.1f} M")
         #k2.metric(f"Realisasi ({label_kpi})", f"Rp {bayar_ini/1e9:,.1f} M", f"{persen:.1f}%")
