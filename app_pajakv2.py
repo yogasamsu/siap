@@ -14,11 +14,10 @@ st.set_page_config(page_title="Sistem Intelijen Pajak", page_icon="💰", layout
 # 2. FITUR KEAMANAN (LOGIN)
 # ==========================================
 def check_password():
-    """Mengembalikan True jika user memasukkan password yang benar."""
     try:
         RAHASIA = st.secrets["password"]
     except:
-        RAHASIA = "admin123" # Default untuk Local
+        RAHASIA = "admin123" 
 
     if "password_correct" not in st.session_state:
         st.session_state.password_correct = False
@@ -39,48 +38,38 @@ if not check_password():
     st.stop()
 
 # ==========================================
-# 3. LOAD DATA (VERSI CHUNKS / PECAHAN)
+# 3. LOAD DATA
 # ==========================================
 @st.cache_data
 def load_data():
-    # --- A. LOAD RFM PROFILE ---
+    # A. LOAD RFM
     path_rfm = 'hasil_rfm_individu_final.csv'
     df_rfm = None
-    
     if os.path.exists(path_rfm):
         try:
             df_rfm = pd.read_csv(path_rfm)
-            # Standarisasi Nama Kolom
             if 'NAMA_WP' not in df_rfm.columns: df_rfm['NAMA_WP'] = "WP-" + df_rfm.index.astype(str)
             df_rfm['NAMA_SEARCH'] = df_rfm['NAMA_WP'].fillna('').astype(str).str.upper()
             if 'ID_WP_INDIVIDUAL' not in df_rfm.columns: df_rfm['ID_WP_INDIVIDUAL'] = df_rfm.index
         except Exception as e:
             st.error(f"Gagal load RFM: {e}")
-    
-    # --- B. LOAD TRANSAKSI (DARI FOLDER CHUNKS) ---
+
+    # B. LOAD TRANSAKSI
     df_transaksi = None
-    
     chunk_files = glob.glob("data_chunks/data_part_*.csv")
-    if not chunk_files:
-        chunk_files = glob.glob("data_part_*.csv") 
+    if not chunk_files: chunk_files = glob.glob("data_part_*.csv")
 
     if chunk_files:
         try:
             chunk_files.sort()
             dfs = []
-            
-            # OPTIMASI MEMORI: Hanya load kolom penting
-            cols_keep = ['THN_PAJAK_SPPT', 'PBB_YG_HARUS_DIBAYAR_SPPT', 'STATUS_PEMBAYARAN_SPPT', 
-                         'KD_PROPINSI', 'KD_DATI2', 'KD_KECAMATAN', 'KD_KELURAHAN', 'NM_WP_SPPT', 'ALAMAT_WP']
-            
-            dtypes = {'KD_PROPINSI': 'int8', 'KD_DATI2': 'int8', 'KD_KECAMATAN': 'int16', 
-                      'KD_KELURAHAN': 'int16', 'THN_PAJAK_SPPT': 'int16', 'STATUS_PEMBAYARAN_SPPT': 'int8',
-                      'PBB_YG_HARUS_DIBAYAR_SPPT': 'float32'}
+            cols = ['THN_PAJAK_SPPT', 'PBB_YG_HARUS_DIBAYAR_SPPT', 'STATUS_PEMBAYARAN_SPPT', 
+                    'ID_WP_INDIVIDUAL', 'KD_KECAMATAN', 'KD_KELURAHAN', 'NM_WP_SPPT', 'ALAMAT_WP', 'KD_PROPINSI', 'KD_DATI2']
+            dtypes = {'STATUS_PEMBAYARAN_SPPT': 'int8', 'PBB_YG_HARUS_DIBAYAR_SPPT': 'float32', 
+                      'THN_PAJAK_SPPT': 'int16', 'KD_KECAMATAN': 'int16', 'KD_KELURAHAN': 'int16'}
 
             for f in chunk_files:
-                chunk = pd.read_csv(f, usecols=lambda c: c in cols_keep, dtype=dtypes, low_memory=False)
-                
-                # Bikin ID
+                chunk = pd.read_csv(f, usecols=lambda c: c in cols, dtype=dtypes, low_memory=False)
                 chunk['ID_WP_INDIVIDUAL'] = (
                     chunk['KD_PROPINSI'].astype(str).str.zfill(2) + '-' +
                     chunk['KD_DATI2'].astype(str).str.zfill(2) + '-' +
@@ -89,23 +78,20 @@ def load_data():
                     chunk['NM_WP_SPPT'].astype(str).str.strip().str.upper() + '_' + 
                     chunk['ALAMAT_WP'].astype(str).str.strip().str.upper()
                 )
-                # Buang kolom pembentuk ID
                 chunk = chunk[['ID_WP_INDIVIDUAL', 'THN_PAJAK_SPPT', 'PBB_YG_HARUS_DIBAYAR_SPPT', 'STATUS_PEMBAYARAN_SPPT']]
                 dfs.append(chunk)
             
             if dfs:
                 df_transaksi = pd.concat(dfs, ignore_index=True)
-                
         except Exception as e:
-            st.warning(f"Gagal menggabungkan data chunks: {e}")
-    
+            st.warning(f"Gagal load transaksi: {e}")
+            
     return df_rfm, df_transaksi
 
-# EKSEKUSI LOAD DATA
 try:
     MAIN_DF_RFM, MAIN_DF_TRANSAKSI = load_data()
 except Exception as e:
-    st.error(f"Error Loading Data: {e}")
+    st.error(f"Error: {e}")
     MAIN_DF_RFM, MAIN_DF_TRANSAKSI = None, None
 
 # ==========================================
@@ -121,7 +107,7 @@ def go_back():
     st.session_state.selected_id = None
 
 # ==========================================
-# 5. HALAMAN DASHBOARD UTAMA (SEARCH + KPI)
+# 5. HALAMAN DASHBOARD (UPDATE FILTER TAHUN)
 # ==========================================
 def show_dashboard(df_rfm, df_trans):
     st.title("📊 Dashboard Eksekutif Pajak Daerah")
@@ -133,104 +119,112 @@ def show_dashboard(df_rfm, df_trans):
     
     st.markdown("---")
 
-    # JIKA ADA PENCARIAN -> TAMPILKAN HASIL PENCARIAN
     if query:
-        if df_rfm is None: 
-            st.error("Data RFM tidak tersedia.")
-            return
-        
+        # (Kode Pencarian Tetap Sama...)
+        if df_rfm is None: return
         hasil = df_rfm[
             df_rfm['NAMA_SEARCH'].str.contains(query, na=False) | 
             df_rfm['ID_WP_INDIVIDUAL'].astype(str).str.contains(query, na=False)
         ]
-        
         st.subheader(f"Hasil Pencarian: {len(hasil)} WP Ditemukan")
         if len(hasil) == 0: st.warning("Tidak ditemukan.")
-        
         for index, row in hasil.head(20).iterrows():
             with st.container():
                 c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
                 c1.markdown(f"**{row.get('NAMA_WP','-')}**")
                 c1.caption(f"{row.get('ALAMAT_WP','-')}")
-                
                 seg = str(row.get('Segment', '-'))
                 if "Berisiko" in seg: c2.error(seg)
                 elif "Champions" in seg: c2.success(seg)
                 else: c2.info(seg)
-                
                 c3.metric("Total Bayar", f"Rp {row.get('Monetary',0):,.0f}")
                 if c4.button("Detail ➡️", key=f"btn_{index}"):
                     go_to_detail(row['ID_WP_INDIVIDUAL'])
                 st.markdown("---")
                 
-    # JIKA TIDAK ADA PENCARIAN -> TAMPILKAN DASHBOARD EKSEKUTIF
     else:
         if df_rfm is None or df_trans is None:
-            st.info("Sedang memuat data Dashboard...")
+            st.info("Sedang memuat data...")
             return
 
-        # --- KPI METRICS ---
-        tahun_ini = df_trans['THN_PAJAK_SPPT'].max()
-        data_tahun_ini = df_trans[df_trans['THN_PAJAK_SPPT'] == tahun_ini]
+        # --- FILTER TAHUN (BARU!) ---
+        # Ambil daftar tahun unik dari data transaksi
+        list_tahun = sorted(df_trans['THN_PAJAK_SPPT'].unique(), reverse=True)
+        list_tahun_str = [str(t) for t in list_tahun]
         
+        # Tambahkan Opsi "Semua Periode"
+        opsi_tahun = ['Semua Periode'] + list_tahun_str
+        
+        col_filter, col_dummy = st.columns([1, 3])
+        with col_filter:
+            pilihan_tahun = st.selectbox("📅 Filter Tahun Pajak:", opsi_tahun)
+
+        # --- LOGIKA FILTERING DATA ---
+        if pilihan_tahun == 'Semua Periode':
+            # Jika Semua, hitung akumulasi
+            data_filtered = df_trans
+            label_kpi = "Total (Semua Tahun)"
+        else:
+            # Jika Tahun Spesifik, filter data transaksi
+            thn_int = int(pilihan_tahun)
+            data_filtered = df_trans[df_trans['THN_PAJAK_SPPT'] == thn_int]
+            label_kpi = f"Tahun {pilihan_tahun}"
+
+        # --- KPI METRICS (DINAMIS SESUAI FILTER) ---
         total_wp = df_rfm['ID_WP_INDIVIDUAL'].nunique()
-        bayar_ini = data_tahun_ini[data_tahun_ini['STATUS_PEMBAYARAN_SPPT'] == 1]['PBB_YG_HARUS_DIBAYAR_SPPT'].sum()
-        tunggak_ini = data_tahun_ini[data_tahun_ini['STATUS_PEMBAYARAN_SPPT'] == 0]['PBB_YG_HARUS_DIBAYAR_SPPT'].sum()
+        
+        # Hitung Realisasi vs Tunggakan dari data_filtered
+        bayar_ini = data_filtered[data_filtered['STATUS_PEMBAYARAN_SPPT'] == 1]['PBB_YG_HARUS_DIBAYAR_SPPT'].sum()
+        tunggak_ini = data_filtered[data_filtered['STATUS_PEMBAYARAN_SPPT'] == 0]['PBB_YG_HARUS_DIBAYAR_SPPT'].sum()
         target_ini = bayar_ini + tunggak_ini
+        
+        # Hitung Tunggakan Total (Selalu Akumulasi agar user tetap aware beban hutang global)
         total_tunggakan_all = df_trans[df_trans['STATUS_PEMBAYARAN_SPPT'] == 0]['PBB_YG_HARUS_DIBAYAR_SPPT'].sum()
 
         k1, k2, k3, k4 = st.columns(4)
         k1.metric("Total Wajib Pajak", f"{total_wp:,.0f}")
-        k2.metric(f"Realisasi {tahun_ini}", f"Rp {bayar_ini/1e9:,.1f} M", f"{(bayar_ini/target_ini)*100:.1f}%" if target_ini > 0 else "0%")
-        k3.metric(f"Potensi Tunggakan {tahun_ini}", f"Rp {tunggak_ini/1e9:,.1f} M", delta_color="inverse")
+        
+        # KPI Dinamis
+        persen = (bayar_ini/target_ini)*100 if target_ini > 0 else 0
+        k2.metric(f"Realisasi ({label_kpi})", f"Rp {bayar_ini/1e9:,.1f} M", f"{persen:.1f}%")
+        k3.metric(f"Tunggakan ({label_kpi})", f"Rp {tunggak_ini/1e9:,.1f} M", delta_color="inverse")
+        
+        # KPI Statis (Beban Hutang Global)
         k4.metric("Total Tunggakan (Akumulasi)", f"Rp {total_tunggakan_all/1e9:,.1f} M", delta_color="inverse")
 
         st.markdown("---")
         
-        # --- BARIS 2: BAR CHART RFM (WARNA MANUAL) ---
+        # --- BARIS 2: RFM BAR CHART (TETAP) ---
+        # Segmentasi tidak berubah walau tahun difilter (karena RFM butuh history)
         st.subheader("🗺️ Peta Kekuatan WP (Segmentasi)")
         
-        # Agregasi Data
         bar_data = df_rfm.groupby('Segment').agg(
             Count=('ID_WP_INDIVIDUAL', 'count'),
             Monetary=('Monetary', 'sum')
-        ).reset_index()
+        ).reset_index().sort_values('Count', ascending=True)
 
-        # --- DEFINISI WARNA MANUAL (HIJAU -> MERAH) ---
-        # Sesuaikan nama segmen persis dengan data Anda
         color_map = {
-            'WP Patuh Terbaik (Champions)': '#2ecc71', # Hijau Terang
-            'WP Patuh (Nilai Kecil)': '#82e0aa',       # Hijau Muda
-            'WP Baru (New)': '#3498db',                # Biru
-            'WP Potensial (Potential)': '#f1c40f',     # Kuning
-            'WP Lainnya (Need Attention)': '#95a5a6',  # Abu-abu
-            'WP Tidur (Nilai Kecil)': '#e67e22',       # Oranye
-            'WP Tidur (Nilai Besar)': '#d35400',       # Oranye Gelap
-            'WP Berisiko (At Risk)': '#e74c3c'         # Merah
+            'WP Patuh Terbaik (Champions)': '#2ecc71', 
+            'WP Patuh (Nilai Kecil)': '#82e0aa',       
+            'WP Baru (New)': '#3498db',                
+            'WP Potensial (Potential)': '#f1c40f',     
+            'WP Lainnya (Need Attention)': '#95a5a6',  
+            'WP Tidur (Nilai Kecil)': '#e67e22',       
+            'WP Tidur (Nilai Besar)': '#d35400',       
+            'WP Berisiko (At Risk)': '#e74c3c'         
         }
-        
-        # Urutkan berdasarkan logika risiko (Hijau di atas, Merah di bawah)
-        urutan_segmen = [
-            'WP Patuh Terbaik (Champions)', 'WP Patuh (Nilai Kecil)', 
-            'WP Baru (New)', 'WP Potensial (Potential)', 
-            'WP Lainnya (Need Attention)', 
+        urutan = [
+            'WP Patuh Terbaik (Champions)', 'WP Patuh (Nilai Kecil)', 'WP Baru (New)', 
+            'WP Potensial (Potential)', 'WP Lainnya (Need Attention)', 
             'WP Tidur (Nilai Kecil)', 'WP Tidur (Nilai Besar)', 'WP Berisiko (At Risk)'
         ]
         
         col_chart, col_text = st.columns([2, 1])
-        
         with col_chart:
             fig_bar = px.bar(
-                bar_data,
-                x='Count',
-                y='Segment',
-                orientation='h',
-                text='Count',
-                color='Segment', # Gunakan segmen sebagai dasar warna
-                color_discrete_map=color_map, # Terapkan peta warna manual
-                category_orders={'Segment': urutan_segmen}, # Paksa urutan
-                title="Komposisi Wajib Pajak (Hijau=Aman, Merah=Bahaya)",
-                labels={'Count': 'Jumlah WP', 'Segment': ''}
+                bar_data, x='Count', y='Segment', orientation='h', text='Count',
+                color='Segment', color_discrete_map=color_map, category_orders={'Segment': urutan},
+                title="Komposisi Wajib Pajak (Hijau=Aman, Merah=Bahaya)", labels={'Count': 'Jumlah WP', 'Segment': ''}
             )
             fig_bar.update_traces(texttemplate='%{text:.2s}', textposition='outside')
             fig_bar.update_layout(height=450, showlegend=False)
@@ -238,31 +232,28 @@ def show_dashboard(df_rfm, df_trans):
 
         with col_text:
             st.markdown("#### 📖 Panduan Strategi")
-            with st.expander("🟢 ZONA HIJAU (Aman)", expanded=True):
-                st.write("**Champions & Patuh:**")
-                st.caption("WP yang selalu bayar tepat waktu. **Strategi:** Apresiasi & Retensi (Jangan diganggu).")
-            
-            with st.expander("🟡 ZONA KUNING (Perlu Atensi)"):
-                st.write("**Potensial & Baru:**")
-                st.caption("WP yang mulai rajin atau baru masuk. **Strategi:** Edukasi & Reminder Halus.")
-            
-            with st.expander("🔴 ZONA MERAH (Bahaya)"):
-                st.write("**Berisiko & Tidur:**")
-                st.caption("WP yang menunggak atau berhenti bayar. **Strategi:** Kunjungan Prioritas & Penagihan Aktif.")
+            with st.expander("🟢 ZONA HIJAU", expanded=True): st.caption("Strategi: Apresiasi & Retensi."); st.write("**Champions & Patuh**")
+            with st.expander("🟡 ZONA KUNING"): st.caption("Strategi: Edukasi & Reminder."); st.write("**Potensial & Baru**")
+            with st.expander("🔴 ZONA MERAH"): st.caption("Strategi: Kunjungan & Penagihan."); st.write("**Berisiko & Tidur**")
 
         st.markdown("---")
         
-        # --- BARIS 3: DONUT CHART & TOP 5 ---
+        # --- BARIS 3: DONUT CHART (DINAMIS) & TOP 5 ---
         c_pie, c_table = st.columns([1, 2])
         
         with c_pie:
-            st.subheader(f"💸 Status {tahun_ini}")
+            st.subheader(f"💸 Status ({label_kpi})")
             labels = ['Lunas', 'Menunggak']
             values = [bayar_ini, tunggak_ini]
             colors = ['#2ecc71', '#e74c3c']
-            fig_pie = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.4, marker_colors=colors)])
-            fig_pie.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=300)
-            st.plotly_chart(fig_pie, use_container_width=True)
+            
+            # Handle jika data kosong
+            if sum(values) == 0:
+                st.info("Tidak ada data tagihan pada tahun ini.")
+            else:
+                fig_pie = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.4, marker_colors=colors)])
+                fig_pie.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=300)
+                st.plotly_chart(fig_pie, use_container_width=True)
             
         with c_table:
             st.subheader("🏆 Top 5 WP (Kakap) per Kategori")
@@ -279,15 +270,14 @@ def show_dashboard(df_rfm, df_trans):
                 st.dataframe(top[['NAMA_WP', 'ALAMAT_WP', 'Monetary']].style.format({'Monetary': 'Rp {:,.0f}'}), use_container_width=True, hide_index=True)
 
 # ==========================================
-# 6. HALAMAN DETAIL
+# 6. HALAMAN DETAIL (TETAP SAMA)
 # ==========================================
 def show_detail_page(df_rfm, df_trans):
     wp_id = st.session_state.selected_id
     
     if df_rfm is None: return
     profil_data = df_rfm[df_rfm['ID_WP_INDIVIDUAL'] == wp_id]
-    if profil_data.empty:
-        st.error("Data tidak ditemukan."); st.button("Kembali", on_click=go_back); return
+    if profil_data.empty: st.error("Data tidak ditemukan."); st.button("Kembali", on_click=go_back); return
 
     profil = profil_data.iloc[0]
     
@@ -316,7 +306,7 @@ def show_detail_page(df_rfm, df_trans):
         else: st.info("Tidak ada data transaksi.")
 
 # ==========================================
-# 7. MAIN ROUTING (FIXED)
+# 7. MAIN ROUTING
 # ==========================================
 if st.session_state.selected_id is not None:
     show_detail_page(MAIN_DF_RFM, MAIN_DF_TRANSAKSI)
