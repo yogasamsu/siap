@@ -186,6 +186,9 @@ def show_dashboard(df_rfm, df_trans):
         
         # KPI Dinamis
         #persen = (bayar_ini/target_ini)*100 if target_ini > 0 else 0
+        # (KODE BARU)
+        k2.metric(f"Realisasi {tahun_ini}", f"Rp {bayar_ini/1e9:,.1f} M")
+        k3.metric(f"Potensi Tunggakan {tahun_ini}", f"Rp {tunggak_ini/1e9:,.1f} M")
         #k2.metric(f"Realisasi ({label_kpi})", f"Rp {bayar_ini/1e9:,.1f} M", f"{persen:.1f}%")
         #k3.metric(f"Tunggakan ({label_kpi})", f"Rp {tunggak_ini/1e9:,.1f} M", delta_color="inverse")
         
