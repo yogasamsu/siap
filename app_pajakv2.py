@@ -185,9 +185,9 @@ def show_dashboard(df_rfm, df_trans):
         k1.metric("Total Wajib Pajak", f"{total_wp:,.0f}")
         
         # KPI Dinamis
-        persen = (bayar_ini/target_ini)*100 if target_ini > 0 else 0
-        k2.metric(f"Realisasi ({label_kpi})", f"Rp {bayar_ini/1e9:,.1f} M", f"{persen:.1f}%")
-        k3.metric(f"Tunggakan ({label_kpi})", f"Rp {tunggak_ini/1e9:,.1f} M", delta_color="inverse")
+        #persen = (bayar_ini/target_ini)*100 if target_ini > 0 else 0
+        #k2.metric(f"Realisasi ({label_kpi})", f"Rp {bayar_ini/1e9:,.1f} M", f"{persen:.1f}%")
+        #k3.metric(f"Tunggakan ({label_kpi})", f"Rp {tunggak_ini/1e9:,.1f} M", delta_color="inverse")
         
         # KPI Statis (Beban Hutang Global)
         k4.metric("Total Tunggakan (Akumulasi)", f"Rp {total_tunggakan_all/1e9:,.1f} M", delta_color="inverse")
