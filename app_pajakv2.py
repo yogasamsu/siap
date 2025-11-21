@@ -193,26 +193,62 @@ def show_dashboard(df_rfm, df_trans):
 
         st.markdown("---")
         
-        # --- BARIS 2: TREEMAP & DONUT CHART ---
-        c_tree, c_pie = st.columns([2, 1])
+        # --- BARIS 2: BAR CHART SEGMEN & PENJELASAN ---
+        st.subheader("🗺️ Peta Kekuatan WP (Segmentasi)")
         
-        with c_tree:
-            st.subheader("🗺️ Peta Kekuatan WP (RFM Treemap)")
-            # Agregasi Data untuk Treemap
-            tree_data = df_rfm.groupby('Segment').agg(
-                Count=('ID_WP_INDIVIDUAL', 'count'),
-                Monetary=('Monetary', 'sum')
-            ).reset_index()
-            
-            fig_tree = px.treemap(
-                tree_data, 
-                path=['Segment'], 
-                values='Count',
-                color='Monetary',
-                color_continuous_scale='RdYlGn',
-                title="Proporsi Segmen WP (Ukuran=Jml Orang, Warna=Jml Uang)"
+        # 1. Siapkan Data
+        bar_data = df_rfm.groupby('Segment').agg(
+            Count=('ID_WP_INDIVIDUAL', 'count'),
+            Monetary=('Monetary', 'sum')
+        ).reset_index().sort_values('Count', ascending=True) # Sort biar bar chart rapi
+        
+        # 2. Buat Layout 2 Kolom (Kiri: Chart, Kanan: Penjelasan)
+        col_chart, col_text = st.columns([2, 1])
+        
+        with col_chart:
+            # Visualisasi Bar Chart Horizontal
+            fig_bar = px.bar(
+                bar_data,
+                x='Count',
+                y='Segment',
+                orientation='h', # Horizontal
+                text='Count',    # Tampilkan angka di ujung bar
+                color='Monetary', # Warna berdasarkan uang (makin gelap makin kaya)
+                color_continuous_scale='Blues',
+                title="Jumlah WP per Segmen (Warna = Nilai Kontribusi)",
+                labels={'Count': 'Jumlah Wajib Pajak', 'Segment': 'Kategori', 'Monetary': 'Total Pajak'}
             )
-            st.plotly_chart(fig_tree, use_container_width=True)
+            fig_bar.update_traces(texttemplate='%{text:.2s}', textposition='outside')
+            fig_bar.update_layout(height=400)
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+        with col_text:
+            st.markdown("#### 📖 Kamus Segmen")
+            
+            # Penjelasan Definisi (Hardcoded Business Logic)
+            with st.expander("💎 Champions (Patuh Terbaik)", expanded=True):
+                st.caption("**Karakteristik:** Selalu bayar tepat waktu, nilai pajak besar.")
+                st.markdown(":green[**Tindakan:**] *Pertahankan (Retensi). Jangan sering diganggu.*")
+
+            with st.expander("🚨 At Risk (Berisiko Tinggi)"):
+                st.caption("**Karakteristik:** Dulu aktif bayar, tapi baru-baru ini berhenti/menunggak.")
+                st.markdown(":red[**Tindakan:**] *Kunjungan Prioritas. Segera tagih sebelum hilang permanen.*")
+
+            with st.expander("💤 Sleeping / Tidur"):
+                st.caption("**Karakteristik:** Sudah lama tidak bayar (lebih dari 2-3 tahun).")
+                st.markdown(":orange[**Tindakan:**] *Cek lapangan (validasi data) atau program pemutihan.*")
+
+            with st.expander("🌱 New / Potensial"):
+                st.caption("**Karakteristik:** WP Baru atau WP lama yang mulai rajin.")
+                st.markdown(":blue[**Tindakan:**] *Edukasi & Reminder halus.*")
+
+        st.markdown("---")
+        
+        # --- BARIS 3: DONUT CHART REALISASI ---
+        # (Kita pindah donut chart ke bawah atau biarkan di samping jika muat, 
+        # tapi lebih rapi jika donut chart fokus ke uang)
+        
+        # ... (Lanjutkan dengan kode Top 5 Table di bawahnya) ...
             
         with c_pie:
             st.subheader(f"💸 Status {tahun_ini}")
