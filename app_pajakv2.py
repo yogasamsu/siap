@@ -14,10 +14,11 @@ st.set_page_config(page_title="Sistem Intelijen Pajak", page_icon="💰", layout
 # 2. FITUR KEAMANAN (LOGIN)
 # ==========================================
 def check_password():
+    """Mengembalikan True jika user memasukkan password yang benar."""
     try:
         RAHASIA = st.secrets["password"]
     except:
-        RAHASIA = "admin123" 
+        RAHASIA = "admin123" # Default untuk Local
 
     if "password_correct" not in st.session_state:
         st.session_state.password_correct = False
@@ -38,38 +39,48 @@ if not check_password():
     st.stop()
 
 # ==========================================
-# 3. LOAD DATA
+# 3. LOAD DATA (VERSI CHUNKS / PECAHAN)
 # ==========================================
 @st.cache_data
 def load_data():
-    # A. LOAD RFM
+    # --- A. LOAD RFM PROFILE ---
     path_rfm = 'hasil_rfm_individu_final.csv'
     df_rfm = None
+    
     if os.path.exists(path_rfm):
         try:
             df_rfm = pd.read_csv(path_rfm)
+            # Standarisasi Nama Kolom
             if 'NAMA_WP' not in df_rfm.columns: df_rfm['NAMA_WP'] = "WP-" + df_rfm.index.astype(str)
             df_rfm['NAMA_SEARCH'] = df_rfm['NAMA_WP'].fillna('').astype(str).str.upper()
             if 'ID_WP_INDIVIDUAL' not in df_rfm.columns: df_rfm['ID_WP_INDIVIDUAL'] = df_rfm.index
         except Exception as e:
             st.error(f"Gagal load RFM: {e}")
-
-    # B. LOAD TRANSAKSI
+    
+    # --- B. LOAD TRANSAKSI (DARI FOLDER CHUNKS) ---
     df_transaksi = None
+    
     chunk_files = glob.glob("data_chunks/data_part_*.csv")
-    if not chunk_files: chunk_files = glob.glob("data_part_*.csv")
+    if not chunk_files:
+        chunk_files = glob.glob("data_part_*.csv") 
 
     if chunk_files:
         try:
             chunk_files.sort()
             dfs = []
-            cols = ['THN_PAJAK_SPPT', 'PBB_YG_HARUS_DIBAYAR_SPPT', 'STATUS_PEMBAYARAN_SPPT', 
-                    'ID_WP_INDIVIDUAL', 'KD_KECAMATAN', 'KD_KELURAHAN', 'NM_WP_SPPT', 'ALAMAT_WP', 'KD_PROPINSI', 'KD_DATI2']
-            dtypes = {'STATUS_PEMBAYARAN_SPPT': 'int8', 'PBB_YG_HARUS_DIBAYAR_SPPT': 'float32', 
-                      'THN_PAJAK_SPPT': 'int16', 'KD_KECAMATAN': 'int16', 'KD_KELURAHAN': 'int16'}
+            
+            # OPTIMASI MEMORI: Hanya load kolom penting
+            cols_keep = ['THN_PAJAK_SPPT', 'PBB_YG_HARUS_DIBAYAR_SPPT', 'STATUS_PEMBAYARAN_SPPT', 
+                         'KD_PROPINSI', 'KD_DATI2', 'KD_KECAMATAN', 'KD_KELURAHAN', 'NM_WP_SPPT', 'ALAMAT_WP']
+            
+            dtypes = {'KD_PROPINSI': 'int8', 'KD_DATI2': 'int8', 'KD_KECAMATAN': 'int16', 
+                      'KD_KELURAHAN': 'int16', 'THN_PAJAK_SPPT': 'int16', 'STATUS_PEMBAYARAN_SPPT': 'int8',
+                      'PBB_YG_HARUS_DIBAYAR_SPPT': 'float32'}
 
             for f in chunk_files:
-                chunk = pd.read_csv(f, usecols=lambda c: c in cols, dtype=dtypes, low_memory=False)
+                chunk = pd.read_csv(f, usecols=lambda c: c in cols_keep, dtype=dtypes, low_memory=False)
+                
+                # Bikin ID
                 chunk['ID_WP_INDIVIDUAL'] = (
                     chunk['KD_PROPINSI'].astype(str).str.zfill(2) + '-' +
                     chunk['KD_DATI2'].astype(str).str.zfill(2) + '-' +
@@ -78,20 +89,23 @@ def load_data():
                     chunk['NM_WP_SPPT'].astype(str).str.strip().str.upper() + '_' + 
                     chunk['ALAMAT_WP'].astype(str).str.strip().str.upper()
                 )
+                # Buang kolom pembentuk ID
                 chunk = chunk[['ID_WP_INDIVIDUAL', 'THN_PAJAK_SPPT', 'PBB_YG_HARUS_DIBAYAR_SPPT', 'STATUS_PEMBAYARAN_SPPT']]
                 dfs.append(chunk)
             
             if dfs:
                 df_transaksi = pd.concat(dfs, ignore_index=True)
+                
         except Exception as e:
-            st.warning(f"Gagal load transaksi: {e}")
-            
+            st.warning(f"Gagal menggabungkan data chunks: {e}")
+    
     return df_rfm, df_transaksi
 
+# EKSEKUSI LOAD DATA
 try:
     MAIN_DF_RFM, MAIN_DF_TRANSAKSI = load_data()
 except Exception as e:
-    st.error(f"Error: {e}")
+    st.error(f"Error Loading Data: {e}")
     MAIN_DF_RFM, MAIN_DF_TRANSAKSI = None, None
 
 # ==========================================
@@ -107,10 +121,10 @@ def go_back():
     st.session_state.selected_id = None
 
 # ==========================================
-# 5. HALAMAN DASHBOARD (UPDATE FILTER TAHUN)
+# 5. HALAMAN DASHBOARD UTAMA (SEARCH + KPI)
 # ==========================================
 def show_dashboard(df_rfm, df_trans):
-    st.title("📊 SIAP (Sitem Informasi & Analisa Pajak)")
+    st.title("📊 SIAP (Sistem Informasi & Analisa Pajak)")
     
     # --- INPUT PENCARIAN ---
     col_search, col_spacer = st.columns([3, 1])
@@ -119,40 +133,47 @@ def show_dashboard(df_rfm, df_trans):
     
     st.markdown("---")
 
+    # JIKA ADA PENCARIAN -> TAMPILKAN HASIL PENCARIAN
     if query:
-        # (Kode Pencarian Tetap Sama...)
-        if df_rfm is None: return
+        if df_rfm is None: 
+            st.error("Data RFM tidak tersedia.")
+            return
+        
         hasil = df_rfm[
             df_rfm['NAMA_SEARCH'].str.contains(query, na=False) | 
             df_rfm['ID_WP_INDIVIDUAL'].astype(str).str.contains(query, na=False)
         ]
+        
         st.subheader(f"Hasil Pencarian: {len(hasil)} WP Ditemukan")
         if len(hasil) == 0: st.warning("Tidak ditemukan.")
+        
         for index, row in hasil.head(20).iterrows():
             with st.container():
                 c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
                 c1.markdown(f"**{row.get('NAMA_WP','-')}**")
                 c1.caption(f"{row.get('ALAMAT_WP','-')}")
+                
                 seg = str(row.get('Segment', '-'))
                 if "Berisiko" in seg: c2.error(seg)
                 elif "Champions" in seg: c2.success(seg)
                 else: c2.info(seg)
+                
                 c3.metric("Total Bayar", f"Rp {row.get('Monetary',0):,.0f}")
                 if c4.button("Detail ➡️", key=f"btn_{index}"):
                     go_to_detail(row['ID_WP_INDIVIDUAL'])
                 st.markdown("---")
                 
+    # JIKA TIDAK ADA PENCARIAN -> TAMPILKAN DASHBOARD EKSEKUTIF
     else:
         if df_rfm is None or df_trans is None:
-            st.info("Sedang memuat data...")
+            st.info("Sedang memuat data Dashboard...")
             return
 
-        # --- FILTER TAHUN (BARU!) ---
+        # --- FILTER TAHUN ---
         # Ambil daftar tahun unik dari data transaksi
         list_tahun = sorted(df_trans['THN_PAJAK_SPPT'].unique(), reverse=True)
         list_tahun_str = [str(t) for t in list_tahun]
         
-        # Tambahkan Opsi "Semua Periode"
         opsi_tahun = ['Semua Periode'] + list_tahun_str
         
         col_filter, col_dummy = st.columns([1, 3])
@@ -161,64 +182,37 @@ def show_dashboard(df_rfm, df_trans):
 
         # --- LOGIKA FILTERING DATA ---
         if pilihan_tahun == 'Semua Periode':
-            # Jika Semua, hitung akumulasi
             data_filtered = df_trans
             label_kpi = "Total (Semua Tahun)"
         else:
-            # Jika Tahun Spesifik, filter data transaksi
             thn_int = int(pilihan_tahun)
             data_filtered = df_trans[df_trans['THN_PAJAK_SPPT'] == thn_int]
             label_kpi = f"Tahun {pilihan_tahun}"
 
-        # --- KPI METRICS (DINAMIS SESUAI FILTER) ---
-        total_wp = df_rfm['ID_WP_INDIVIDUAL'].nunique()
-        
-        # Hitung Realisasi vs Tunggakan dari data_filtered
-        bayar_ini = data_filtered[data_filtered['STATUS_PEMBAYARAN_SPPT'] == 1]['PBB_YG_HARUS_DIBAYAR_SPPT'].sum()
-        tunggak_ini = data_filtered[data_filtered['STATUS_PEMBAYARAN_SPPT'] == 0]['PBB_YG_HARUS_DIBAYAR_SPPT'].sum()
-        target_ini = bayar_ini + tunggak_ini
-        
-        # Hitung Tunggakan Total (Selalu Akumulasi agar user tetap aware beban hutang global)
-        total_tunggakan_all = df_trans[df_trans['STATUS_PEMBAYARAN_SPPT'] == 0]['PBB_YG_HARUS_DIBAYAR_SPPT'].sum()
-
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Total Wajib Pajak", f"{total_wp:,.0f}")
-        
-        # KPI Dinamis
-        #persen = (bayar_ini/target_ini)*100 if target_ini > 0 else 0
-        # (KODE BARU)
-        # --- KPI METRICS (DINAMIS SESUAI FILTER) ---
+        # --- KPI METRICS (DINAMIS) ---
         total_wp = df_rfm['ID_WP_INDIVIDUAL'].nunique()
         
         # Hitung Realisasi vs Tunggakan dari data_filtered
         bayar_ini = data_filtered[data_filtered['STATUS_PEMBAYARAN_SPPT'] == 1]['PBB_YG_HARUS_DIBAYAR_SPPT'].sum()
         tunggak_ini = data_filtered[data_filtered['STATUS_PEMBAYARAN_SPPT'] == 0]['PBB_YG_HARUS_DIBAYAR_SPPT'].sum()
         
-        # Hitung Tunggakan Total (Selalu Akumulasi)
+        # Hitung Tunggakan Total (Selalu Akumulasi untuk info global)
         total_tunggakan_all = df_trans[df_trans['STATUS_PEMBAYARAN_SPPT'] == 0]['PBB_YG_HARUS_DIBAYAR_SPPT'].sum()
 
         k1, k2, k3, k4 = st.columns(4)
         k1.metric("Total Wajib Pajak", f"{total_wp:,.0f}")
         
-        # --- PERBAIKAN DI SINI (Gunakan label_kpi) ---
-        # Hapus persen (argumen ke-3), dan gunakan label_kpi bukan tahun_ini
-        #k2.metric(f"Realisasi ({label_kpi})", f"Rp {bayar_ini/1e9:,.1f} M")
-        #k3.metric(f"Tunggakan ({label_kpi})", f"Rp {tunggak_ini/1e9:,.1f} M", delta_color="inverse")
-        
-        # KPI Statis
-        k4.metric("Total Tunggakan (Akumulasi)", f"Rp {total_tunggakan_all/1e9:,.1f} M", delta_color="inverse")
-        k2.metric(f"Realisasi {tahun_ini}", f"Rp {bayar_ini/1e9:,.1f} M")
-        k3.metric(f"Potensi Tunggakan {tahun_ini}", f"Rp {tunggak_ini/1e9:,.1f} M")
-        #k2.metric(f"Realisasi ({label_kpi})", f"Rp {bayar_ini/1e9:,.1f} M", f"{persen:.1f}%")
-        #k3.metric(f"Tunggakan ({label_kpi})", f"Rp {tunggak_ini/1e9:,.1f} M", delta_color="inverse")
+        # REVISI DI SINI: MENGHAPUS ANGKA PERSENTASE/GROWTH (HIJAU)
+        # Menggunakan label_kpi agar dinamis sesuai tahun yang dipilih
+        k2.metric(f"Realisasi ({label_kpi})", f"Rp {bayar_ini/1e9:,.1f} M")
+        k3.metric(f"Potensi Tunggakan ({label_kpi})", f"Rp {tunggak_ini/1e9:,.1f} M", delta_color="inverse")
         
         # KPI Statis (Beban Hutang Global)
         k4.metric("Total Tunggakan (Akumulasi)", f"Rp {total_tunggakan_all/1e9:,.1f} M", delta_color="inverse")
 
         st.markdown("---")
         
-        # --- BARIS 2: RFM BAR CHART (TETAP) ---
-        # Segmentasi tidak berubah walau tahun difilter (karena RFM butuh history)
+        # --- BARIS 2: RFM BAR CHART (WARNA MANUAL) ---
         st.subheader("🗺️ Peta Kekuatan WP (Segmentasi)")
         
         bar_data = df_rfm.groupby('Segment').agg(
@@ -226,6 +220,7 @@ def show_dashboard(df_rfm, df_trans):
             Monetary=('Monetary', 'sum')
         ).reset_index().sort_values('Count', ascending=True)
 
+        # Warna Manual sesuai request
         color_map = {
             'WP Patuh Terbaik (Champions)': '#2ecc71', 
             'WP Patuh (Nilai Kecil)': '#82e0aa',       
@@ -270,9 +265,8 @@ def show_dashboard(df_rfm, df_trans):
             values = [bayar_ini, tunggak_ini]
             colors = ['#2ecc71', '#e74c3c']
             
-            # Handle jika data kosong
             if sum(values) == 0:
-                st.info("Tidak ada data tagihan pada tahun ini.")
+                st.info("Tidak ada data tagihan pada periode ini.")
             else:
                 fig_pie = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.4, marker_colors=colors)])
                 fig_pie.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=300)
@@ -329,7 +323,7 @@ def show_detail_page(df_rfm, df_trans):
         else: st.info("Tidak ada data transaksi.")
 
 # ==========================================
-# 7. MAIN ROUTING
+# 7. MAIN ROUTING (FIXED)
 # ==========================================
 if st.session_state.selected_id is not None:
     show_detail_page(MAIN_DF_RFM, MAIN_DF_TRANSAKSI)
