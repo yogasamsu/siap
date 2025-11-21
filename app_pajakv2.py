@@ -18,7 +18,7 @@ def check_password():
     try:
         RAHASIA = st.secrets["password"]
     except:
-        RAHASIA = "admin123" # Password default untuk Local
+        RAHASIA = "admin123" # Default untuk Local
 
     if "password_correct" not in st.session_state:
         st.session_state.password_correct = False
@@ -170,21 +170,15 @@ def show_dashboard(df_rfm, df_trans):
             return
 
         # --- KPI METRICS (SNAPSHOT) ---
-        # Hitung tahun ini (asumsi tahun max di data)
         tahun_ini = df_trans['THN_PAJAK_SPPT'].max()
         data_tahun_ini = df_trans[df_trans['THN_PAJAK_SPPT'] == tahun_ini]
-        
         total_wp = df_rfm['ID_WP_INDIVIDUAL'].nunique()
         
-        # Hitung Realisasi vs Tunggakan (Tahun Ini)
         bayar_ini = data_tahun_ini[data_tahun_ini['STATUS_PEMBAYARAN_SPPT'] == 1]['PBB_YG_HARUS_DIBAYAR_SPPT'].sum()
         tunggak_ini = data_tahun_ini[data_tahun_ini['STATUS_PEMBAYARAN_SPPT'] == 0]['PBB_YG_HARUS_DIBAYAR_SPPT'].sum()
         target_ini = bayar_ini + tunggak_ini
-        
-        # Hitung Total Tunggakan (Semua Tahun)
         total_tunggakan_all = df_trans[df_trans['STATUS_PEMBAYARAN_SPPT'] == 0]['PBB_YG_HARUS_DIBAYAR_SPPT'].sum()
 
-        # Tampilkan KPI
         k1, k2, k3, k4 = st.columns(4)
         k1.metric("Total Wajib Pajak", f"{total_wp:,.0f}")
         k2.metric(f"Realisasi {tahun_ini}", f"Rp {bayar_ini/1e9:,.1f} M", f"{(bayar_ini/target_ini)*100:.1f}%" if target_ini > 0 else "0%")
@@ -193,16 +187,15 @@ def show_dashboard(df_rfm, df_trans):
 
         st.markdown("---")
         
-        # --- BARIS 2: BAR CHART SEGMEN & PENJELASAN ---
+        # --- BARIS 2: RFM BAR CHART & PENJELASAN (Layout KSO SCISI) ---
         st.subheader("🗺️ Peta Kekuatan WP (Segmentasi)")
         
-        # 1. Siapkan Data
+        # Siapkan Data Chart
         bar_data = df_rfm.groupby('Segment').agg(
             Count=('ID_WP_INDIVIDUAL', 'count'),
             Monetary=('Monetary', 'sum')
-        ).reset_index().sort_values('Count', ascending=True) # Sort biar bar chart rapi
-        
-        # 2. Buat Layout 2 Kolom (Kiri: Chart, Kanan: Penjelasan)
+        ).reset_index().sort_values('Count', ascending=True)
+
         col_chart, col_text = st.columns([2, 1])
         
         with col_chart:
@@ -211,73 +204,59 @@ def show_dashboard(df_rfm, df_trans):
                 bar_data,
                 x='Count',
                 y='Segment',
-                orientation='h', # Horizontal
-                text='Count',    # Tampilkan angka di ujung bar
-                color='Monetary', # Warna berdasarkan uang (makin gelap makin kaya)
+                orientation='h',
+                text='Count',
+                color='Monetary',
                 color_continuous_scale='Blues',
                 title="Jumlah WP per Segmen (Warna = Nilai Kontribusi)",
-                labels={'Count': 'Jumlah Wajib Pajak', 'Segment': 'Kategori', 'Monetary': 'Total Pajak'}
+                labels={'Count': 'Jumlah WP', 'Segment': '', 'Monetary': 'Rupiah'}
             )
             fig_bar.update_traces(texttemplate='%{text:.2s}', textposition='outside')
-            fig_bar.update_layout(height=400)
+            fig_bar.update_layout(height=450, showlegend=False)
             st.plotly_chart(fig_bar, use_container_width=True)
 
         with col_text:
             st.markdown("#### 📖 Kamus Segmen")
-            
-            # Penjelasan Definisi (Hardcoded Business Logic)
-            with st.expander("💎 Champions (Patuh Terbaik)", expanded=True):
-                st.caption("**Karakteristik:** Selalu bayar tepat waktu, nilai pajak besar.")
-                st.markdown(":green[**Tindakan:**] *Pertahankan (Retensi). Jangan sering diganggu.*")
-
-            with st.expander("🚨 At Risk (Berisiko Tinggi)"):
-                st.caption("**Karakteristik:** Dulu aktif bayar, tapi baru-baru ini berhenti/menunggak.")
-                st.markdown(":red[**Tindakan:**] *Kunjungan Prioritas. Segera tagih sebelum hilang permanen.*")
-
-            with st.expander("💤 Sleeping / Tidur"):
-                st.caption("**Karakteristik:** Sudah lama tidak bayar (lebih dari 2-3 tahun).")
-                st.markdown(":orange[**Tindakan:**] *Cek lapangan (validasi data) atau program pemutihan.*")
-
+            with st.expander("💎 Champions (Patuh)", expanded=True):
+                st.caption("Selalu bayar tepat waktu, nilai pajak besar.")
+                st.markdown(":green[**Action:**] *Pertahankan (Retensi).*")
+            with st.expander("🚨 At Risk (Berisiko)"):
+                st.caption("Dulu aktif, baru-baru ini berhenti bayar.")
+                st.markdown(":red[**Action:**] *Kunjungan Prioritas!*")
+            with st.expander("💤 Sleeping (Tidur)"):
+                st.caption("Sudah lama tidak bayar (>3 tahun).")
+                st.markdown(":orange[**Action:**] *Cek Lapangan / Pemutihan.*")
             with st.expander("🌱 New / Potensial"):
-                st.caption("**Karakteristik:** WP Baru atau WP lama yang mulai rajin.")
-                st.markdown(":blue[**Tindakan:**] *Edukasi & Reminder halus.*")
+                st.caption("WP Baru atau mulai rajin.")
+                st.markdown(":blue[**Action:**] *Edukasi & Reminder.*")
 
         st.markdown("---")
         
-        # --- BARIS 3: DONUT CHART REALISASI ---
-        # (Kita pindah donut chart ke bawah atau biarkan di samping jika muat, 
-        # tapi lebih rapi jika donut chart fokus ke uang)
+        # --- BARIS 3: DONUT CHART & TOP 5 ---
+        c_pie, c_table = st.columns([1, 2])
         
-        # ... (Lanjutkan dengan kode Top 5 Table di bawahnya) ...
-            
         with c_pie:
             st.subheader(f"💸 Status {tahun_ini}")
             labels = ['Lunas', 'Menunggak']
             values = [bayar_ini, tunggak_ini]
             colors = ['#2ecc71', '#e74c3c']
-            
             fig_pie = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.4, marker_colors=colors)])
-            fig_pie.update_layout(showlegend=True, margin=dict(t=0, b=0, l=0, r=0))
+            fig_pie.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=300)
             st.plotly_chart(fig_pie, use_container_width=True)
-
-        st.markdown("---")
-        
-        # --- BARIS 3: TOP 5 WP (KAKAP) ---
-        st.subheader("🏆 Top 5 Wajib Pajak (Kakap) per Kategori")
-        
-        tab1, tab2, tab3 = st.tabs(["💎 Champions (Patuh)", "🚨 At Risk (Berisiko)", "💤 Sleeping (Tidur)"])
-        
-        with tab1:
-            top_champ = df_rfm[df_rfm['Segment'].str.contains('Champions', na=False)].nlargest(5, 'Monetary')
-            st.dataframe(top_champ[['NAMA_WP', 'ALAMAT_WP', 'Monetary', 'Frequency']].style.format({'Monetary': 'Rp {:,.0f}'}), use_container_width=True)
             
-        with tab2:
-            top_risk = df_rfm[df_rfm['Segment'].str.contains('Berisiko', na=False)].nlargest(5, 'Monetary')
-            st.dataframe(top_risk[['NAMA_WP', 'ALAMAT_WP', 'Monetary', 'Frequency']].style.format({'Monetary': 'Rp {:,.0f}'}), use_container_width=True)
-
-        with tab3:
-            top_sleep = df_rfm[df_rfm['Segment'].str.contains('Tidur', na=False)].nlargest(5, 'Monetary')
-            st.dataframe(top_sleep[['NAMA_WP', 'ALAMAT_WP', 'Monetary', 'Recency']].style.format({'Monetary': 'Rp {:,.0f}'}), use_container_width=True)
+        with c_table:
+            st.subheader("🏆 Top 5 WP (Kakap) per Kategori")
+            tab1, tab2, tab3 = st.tabs(["💎 Champions", "🚨 At Risk", "💤 Sleeping"])
+            
+            with tab1:
+                top = df_rfm[df_rfm['Segment'].str.contains('Champions', na=False)].nlargest(5, 'Monetary')
+                st.dataframe(top[['NAMA_WP', 'ALAMAT_WP', 'Monetary']].style.format({'Monetary': 'Rp {:,.0f}'}), use_container_width=True, hide_index=True)
+            with tab2:
+                top = df_rfm[df_rfm['Segment'].str.contains('Berisiko', na=False)].nlargest(5, 'Monetary')
+                st.dataframe(top[['NAMA_WP', 'ALAMAT_WP', 'Monetary']].style.format({'Monetary': 'Rp {:,.0f}'}), use_container_width=True, hide_index=True)
+            with tab3:
+                top = df_rfm[df_rfm['Segment'].str.contains('Tidur', na=False)].nlargest(5, 'Monetary')
+                st.dataframe(top[['NAMA_WP', 'ALAMAT_WP', 'Monetary']].style.format({'Monetary': 'Rp {:,.0f}'}), use_container_width=True, hide_index=True)
 
 # ==========================================
 # 6. HALAMAN DETAIL
@@ -312,7 +291,6 @@ def show_detail_page(df_rfm, df_trans):
                          color_discrete_map={'Lunas':'#2ecc71', 'Tunggakan':'#e74c3c'})
             st.plotly_chart(fig, use_container_width=True)
             
-            # Tabel detail
             view = histori[['THN_PAJAK_SPPT','PBB_YG_HARUS_DIBAYAR_SPPT','Status']]
             st.dataframe(view, use_container_width=True, hide_index=True)
         else: st.info("Tidak ada data transaksi.")
@@ -323,5 +301,4 @@ def show_detail_page(df_rfm, df_trans):
 if st.session_state.selected_id is not None:
     show_detail_page(MAIN_DF_RFM, MAIN_DF_TRANSAKSI)
 else:
-    # PANGGIL FUNGSI DASHBOARD YANG BARU
     show_dashboard(MAIN_DF_RFM, MAIN_DF_TRANSAKSI)
